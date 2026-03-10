@@ -63,7 +63,9 @@ const WarehouseItemsTable = ({ items, formatDateTime }) => {
             <th className="px-4 py-3 text-right whitespace-nowrap">Quantity</th>
             <th className="px-4 py-3 text-right whitespace-nowrap">No. of Boxes</th>
             <th className="px-4 py-3 text-right whitespace-nowrap">Qty / Box</th>
-            <th className="px-4 py-3 text-right whitespace-nowrap">Missing</th>
+            <th className="px-4 py-3 text-right whitespace-nowrap">Total Qty</th>
+            <th className="px-4 py-3 text-right whitespace-nowrap">Missing Boxes</th>
+            <th className="px-4 py-3 text-right whitespace-nowrap">Missing Qty</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100 bg-white">
@@ -103,6 +105,10 @@ const WarehouseItemsTable = ({ items, formatDateTime }) => {
                     ) : '—'}
                   </td>
                   <td className="px-4 py-3 text-right text-gray-700">{item.quantity_per_box || '—'}</td>
+                  <td className="px-4 py-3 text-right font-medium text-gray-900">{(item.quantity || 0).toLocaleString()}</td>
+                  <td className={`px-4 py-3 text-right font-medium ${parseInt(item.missing_boxes) > 0 ? 'text-red-600' : 'text-gray-400'}`}>
+                    {item.missing_boxes || '0'}
+                  </td>
                   <td className={`px-4 py-3 text-right font-medium ${parseInt(item.missing_quantity) > 0 ? 'text-red-600' : 'text-gray-400'}`}>
                     {item.missing_quantity || '0'}
                   </td>
@@ -111,7 +117,7 @@ const WarehouseItemsTable = ({ items, formatDateTime }) => {
                 {/* Expanded box breakdown */}
                 {isExpanded && boxes.length > 0 && (
                   <tr key={`boxes-${idx}`}>
-                    <td colSpan="7" className="px-0 py-0 bg-gray-50 border-b border-gray-200">
+                    <td colSpan="9" className="px-0 py-0 bg-gray-50 border-b border-gray-200">
                       <div className="px-8 py-3">
                         <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
                           Box Breakdown — {item.item_type} · {boxes.length} boxes
@@ -125,6 +131,7 @@ const WarehouseItemsTable = ({ items, formatDateTime }) => {
                                   <th className="px-3 py-2 text-center text-xs font-semibold text-gray-500 uppercase">Qty</th>
                                   <th className="px-3 py-2 text-center text-xs font-semibold text-gray-500 uppercase">Missing</th>
                                   <th className="px-3 py-2 text-center text-xs font-semibold text-gray-500 uppercase">Extra</th>
+                                  <th className="px-3 py-2 text-center text-xs font-semibold text-gray-500 uppercase">Final Qty</th>
                                   <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Remarks</th>
                                 </tr>
                               </thead>
@@ -138,6 +145,16 @@ const WarehouseItemsTable = ({ items, formatDateTime }) => {
                                     </td>
                                     <td className={`px-3 py-2 text-center font-medium ${(box.extra_qty || 0) > 0 ? 'text-blue-600' : 'text-gray-400'}`}>
                                       {box.extra_qty || 0}
+                                    </td>
+                                    <td className="px-3 py-2 text-center">
+                                      {(() => {
+                                        const finalQty = Math.max(0, (box.quantity || 0) - (box.missing_qty || 0) + (box.extra_qty || 0));
+                                        return (
+                                          <span className={`text-xs font-semibold ${finalQty < (box.quantity||0) ? 'text-red-600' : finalQty > (box.quantity||0) ? 'text-blue-600' : 'text-green-700'}`}>
+                                            {finalQty.toLocaleString()}
+                                          </span>
+                                        );
+                                      })()}
                                     </td>
                                     <td className="px-3 py-2 text-gray-500 italic">{box.remarks || '—'}</td>
                                   </tr>
@@ -164,6 +181,12 @@ const WarehouseItemsTable = ({ items, formatDateTime }) => {
               {items.reduce((s, i) => s + (parseInt(i.no_of_boxes) || 0), 0)} boxes
             </td>
             <td />
+            <td className="px-4 py-3 text-right text-gray-900 font-bold">
+              {items.reduce((s, i) => s + (parseInt(i.quantity) || 0), 0).toLocaleString()}
+            </td>
+            <td className={`px-4 py-3 text-right ${items.reduce((s,i)=>s+(parseInt(i.missing_boxes)||0),0)>0?'text-red-600':'text-gray-400'}`}>
+              {items.reduce((s,i)=>s+(parseInt(i.missing_boxes)||0),0)||'0'}
+            </td>
             <td className={`px-4 py-3 text-right ${items.reduce((s, i) => s + (parseInt(i.missing_quantity) || 0), 0) > 0 ? 'text-red-600' : 'text-gray-400'}`}>
               {items.reduce((s, i) => s + (parseInt(i.missing_quantity) || 0), 0) || '0'}
             </td>
@@ -364,11 +387,13 @@ const ShipmentView = ({ lc, shipment, onBack }) => {
     return (
       <div>
         <GroupLabel>Interest Details</GroupLabel>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-x-8 gap-y-5">
-          <Field label="Date"                    value={formatDate(d.date)} />
-          <Field label="Document No."            value={d.document_no} />
-          <Field label="LC Value (BDT Realised)" value={d.lc_value_bdt_realised ? `৳${d.lc_value_bdt_realised.toLocaleString()}` : '—'} />
-          <Field label="Interest Amount (BDT)"   value={d.interest_amount ? `৳${d.interest_amount.toLocaleString()}` : '—'} />
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-x-8 gap-y-5">
+          <Field label="Date"                         value={formatDate(d.date)} />
+          <Field label="Document No."                 value={d.document_no} />
+          <Field label="LC Value Foreign Realised"    value={d.lc_value_foreign_realised ? d.lc_value_foreign_realised.toLocaleString() : '—'} />
+          <Field label="Exchange Rate"                value={d.exchange_rate ? d.exchange_rate.toLocaleString() : '—'} />
+          <Field label="LC Value BDT Realised"        value={d.lc_value_bdt_realised ? `৳ ${parseFloat(d.lc_value_bdt_realised).toLocaleString()}` : '—'} />
+          <Field label="Interest Amount (BDT)"        value={d.interest_amount ? `৳ ${d.interest_amount.toLocaleString()}` : '—'} />
         </div>
 
         <Divider />

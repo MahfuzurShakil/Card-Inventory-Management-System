@@ -79,19 +79,19 @@ const Sidebar = ({ currentView, setCurrentView, children }) => {
     { id: 'employee-list',   label: 'Employees',     icon: Users,     view: 'employee-list'   },
     { id: 'shift-roster-list', label: 'Shift Rosters', icon: Calendar, view: 'shift-roster-list' }
   ]
-}
-    // {
-    //   id: 'finance',
-    //   label: 'Finance',
-    //   icon: DollarSign,
-    //   expandable: true,
-    //   submenu: [
-    //     { id: 'finance-dashboard', label: 'Finance Dashboard', icon: BarChart3, view: 'finance-dashboard' },
-    //     { id: 'local-costs', label: 'Local Costs', icon: Receipt, view: 'local-costs' },
-    //     { id: 'cost-analysis', label: 'Cost Analysis', icon: FileSpreadsheet, view: 'cost-analysis' },
-    //     { id: 'profitability', label: 'Profitability', icon: TrendingUp, view: 'profitability' }
-    //   ]
-    // }
+},
+    {
+      id: 'finance',
+      label: 'Finance',
+      icon: DollarSign,
+      expandable: true,
+      submenu: [
+        { id: 'finance-dashboard', label: 'Finance Dashboard', icon: BarChart3, view: 'finance-dashboard' },
+        { id: 'local-costs', label: 'Local Costs', icon: Receipt, view: 'local-costs' },
+        { id: 'cost-analysis', label: 'Cost Analysis', icon: FileSpreadsheet, view: 'cost-analysis' },
+        { id: 'profitability', label: 'Profitability', icon: TrendingUp, view: 'profitability' }
+      ]
+    }
   ];
 
   const handleNavigation = (view) => {
