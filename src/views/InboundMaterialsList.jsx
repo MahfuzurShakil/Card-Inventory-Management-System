@@ -41,9 +41,10 @@ const InboundMaterialsList = ({ inboundMaterials, lcs, onReceiveMaterial, onView
 
   const handleFilterChange = (setter) => (value) => { setter(value); setCurrentPage(1); };
 
-  const totalMaterials = inboundMaterials.length;
-  const pendingCount   = inboundMaterials.filter(m => m.status === 'Pending').length;
-  const receivedCount  = inboundMaterials.filter(m => m.status === 'Received').length;
+  const totalMaterials   = inboundMaterials.length;
+  const pendingCount     = inboundMaterials.filter(m => m.status === 'Pending').length;
+  const receivedCount    = inboundMaterials.filter(m => m.status === 'Received').length;
+  const partialCount     = inboundMaterials.filter(m => m.status === 'Partially Received').length;
 
   return (
     <div className="space-y-6">
@@ -158,17 +159,33 @@ const InboundMaterialsList = ({ inboundMaterials, lcs, onReceiveMaterial, onView
                         <td className="px-6 py-4">
                           {material.status === 'Pending' ? (
                             <span className="px-2 py-1 text-xs font-medium rounded-full bg-orange-100 text-orange-800">Pending</span>
+                          ) : material.status === 'Partially Received' ? (
+                            <span className="px-2 py-1 text-xs font-medium rounded-full bg-amber-100 text-amber-800">Partially Received</span>
                           ) : (
                             <span className="px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-800">Received</span>
                           )}
                         </td>
                         <td className="px-6 py-4 text-right">
-                          <button
-                            onClick={() => onReceiveMaterial(material)}
-                            className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
-                          >
-                            Receive
-                          </button>
+                          {material.status === 'Received' ? (
+                            <button
+                              onClick={() => onViewDetails && onViewDetails(material)}
+                              className="p-1.5 text-gray-600 hover:bg-gray-100 rounded transition-colors"
+                              title="View Details"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => onReceiveMaterial(material)}
+                              className={`px-3 py-1.5 text-white text-sm font-medium rounded-lg transition-colors ${
+                                material.status === 'Partially Received'
+                                  ? 'bg-amber-500 hover:bg-amber-600'
+                                  : 'bg-blue-600 hover:bg-blue-700'
+                              }`}
+                            >
+                              {material.status === 'Partially Received' ? 'Continue Receiving' : 'Receive'}
+                            </button>
+                          )}
                         </td>
                       </tr>
                     );
@@ -220,26 +237,33 @@ const InboundMaterialsList = ({ inboundMaterials, lcs, onReceiveMaterial, onView
                             <td className="px-6 py-4" rowSpan={warehouseItems.length}>
                               {material.status === 'Pending' ? (
                                 <span className="px-2 py-1 text-xs font-medium rounded-full bg-orange-100 text-orange-800">Pending</span>
+                              ) : material.status === 'Partially Received' ? (
+                                <span className="px-2 py-1 text-xs font-medium rounded-full bg-amber-100 text-amber-800">Partially Received</span>
                               ) : (
                                 <span className="px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-800">Received</span>
                               )}
                             </td>
                             <td className="px-6 py-4" rowSpan={warehouseItems.length}>
                               <div className="flex items-center gap-2 justify-end">
-                                {material.status === 'Pending' ? (
-                                  <button
-                                    onClick={() => onReceiveMaterial(material)}
-                                    className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
-                                  >
-                                    Receive
-                                  </button>
-                                ) : (
+                                {material.status === 'Received' ? (
                                   <button
                                     onClick={() => onViewDetails && onViewDetails(material)}
                                     className="p-1.5 text-gray-600 hover:bg-gray-100 rounded transition-colors"
                                     title="View Details"
                                   >
                                     <Eye className="w-4 h-4" />
+                                  </button>
+                                ) : (
+                                  // Both Pending and Partially Received show the Receive button
+                                  <button
+                                    onClick={() => onReceiveMaterial(material)}
+                                    className={`px-3 py-1.5 text-white text-sm font-medium rounded-lg transition-colors ${
+                                      material.status === 'Partially Received'
+                                        ? 'bg-amber-500 hover:bg-amber-600'
+                                        : 'bg-blue-600 hover:bg-blue-700'
+                                    }`}
+                                  >
+                                    {material.status === 'Partially Received' ? 'Continue Receiving' : 'Receive'}
                                   </button>
                                 )}
                               </div>

@@ -524,9 +524,9 @@ const ShipmentDetail = ({ lc, shipment, onBack, onUpdateShipment, onComplete }) 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   LC Value BDT Realised
-                  <span className="ml-2 text-xs font-normal text-indigo-500 inline-flex items-center gap-1">
+                  {/* <span className="ml-2 text-xs font-normal text-indigo-500 inline-flex items-center gap-1">
                     <Lock className="w-3 h-3" /> Auto-computed
-                  </span>
+                  </span> */}
                 </label>
                 <div className="w-full px-4 py-2 border border-indigo-200 bg-indigo-50 rounded-lg text-sm font-semibold text-indigo-900 min-h-[42px]">
                   {formData.lc_value_bdt_realised

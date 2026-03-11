@@ -86,10 +86,9 @@ const Sidebar = ({ currentView, setCurrentView, children }) => {
       icon: DollarSign,
       expandable: true,
       submenu: [
-        { id: 'finance-dashboard', label: 'Finance Dashboard', icon: BarChart3, view: 'finance-dashboard' },
-        { id: 'local-costs', label: 'Local Costs', icon: Receipt, view: 'local-costs' },
-        { id: 'cost-analysis', label: 'Cost Analysis', icon: FileSpreadsheet, view: 'cost-analysis' },
-        { id: 'profitability', label: 'Profitability', icon: TrendingUp, view: 'profitability' }
+        { id: 'finance-dashboard', label: 'Finance Overview', icon: BarChart3,  view: 'finance-dashboard' },
+        { id: 'landing-cost',      label: 'Landing Cost',     icon: TrendingUp, view: 'landing-cost'      },
+        { id: 'local-costs',       label: 'Local Costs',      icon: Receipt,    view: 'local-costs'       },
       ]
     }
   ];

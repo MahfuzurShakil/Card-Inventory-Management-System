@@ -38,6 +38,9 @@ import LocalCosts from './views/LocalCosts';
 
 import ShiftRosterList from './views/ShiftRosterList';
 
+import LandingCost from './views/LandingCost';
+
+
 // INITIAL MOCK DATA WITH COMPLETED SHIPMENT FOR TESTING
 const INITIAL_LCS = [
   {
@@ -326,6 +329,8 @@ const [localCosts, setLocalCosts] = useState([]);
 const [rosterContext, setRosterContext] = useState(null);
 
 const [selectedSubBoxIdsForChallan, setSelectedSubBoxIdsForChallan] = useState([]);
+
+const [financeData, setFinanceData] = useState({});
   
   const navigate = (view, lc = null, material = null, employee = null, box = null, subBox = null, context = null) => {
     setCurrentView(view);
@@ -466,26 +471,28 @@ const handleSaveAssignments = (assignments) => {
 };
 
 
-  // ✅ FIXED: Handle Inbound Material Receipt with Auto Box Creation
+  // Handle Inbound Material Receipt — supports both full and partial (batched) receiving
   const handleSaveInboundMaterial = (receiptData) => {
     const material = inboundMaterials.find(im => im.id === receiptData.material_id);
     if (!material) return;
 
-    // Update inbound material status
-    const updatedMaterials = inboundMaterials.map(im => 
-      im.id === receiptData.material_id 
-        ? { 
-            ...im, 
-            status: 'Received',
-            received_by: receiptData.received_by,
-            received_at: receiptData.received_at,
-            item_verifications: receiptData.item_verifications
+    const newStatus = receiptData.status || 'Received'; // 'Partially Received' or 'Received'
+
+    // Update inbound material status — preserve received_box_keys for partial flow
+    setInboundMaterials(prev => prev.map(im =>
+      im.id === receiptData.material_id
+        ? {
+            ...im,
+            status:             newStatus,
+            received_by:        receiptData.received_by,
+            received_at:        receiptData.received_at,
+            item_verifications: receiptData.item_verifications,
+            received_box_keys:  receiptData.received_box_keys || {},
           }
         : im
-    );
-    setInboundMaterials(updatedMaterials);
+    ));
 
-    // Lock the warehouse step on the parent shipment — prevents proc user from editing
+    // Lock/update warehouse step on parent shipment
     setLcs(prevLcs =>
       prevLcs.map(lc => ({
         ...lc,
@@ -497,7 +504,7 @@ const handleSaveAssignments = (assignments) => {
               ...s.stepData,
               warehouse: {
                 ...s.stepData?.warehouse,
-                warehouse_status: 'received',
+                warehouse_status: newStatus === 'Received' ? 'received' : 'partially_received',
                 received_at: receiptData.received_at,
               }
             }
@@ -506,39 +513,35 @@ const handleSaveAssignments = (assignments) => {
       }))
     );
 
-    // Auto-create boxes from verified items
-    if (receiptData.auto_create_boxes) {
-      const newBoxes = [];
-      let boxCounter = 1;
-
-      receiptData.item_verifications.forEach(item => {
-        const boxesForItem = item.no_of_boxes;
-        const qtyPerBox = Math.floor(item.final_quantity / boxesForItem);
-        const remainder = item.final_quantity % boxesForItem;
-
-        for (let i = 0; i < boxesForItem; i++) {
-          newBoxes.push({
-            id: Date.now() + boxCounter,
-            inbound_material_id: material.id,
-            shipment_id: material.shipment_id,
-            box_name: `${item.item_type}-BOX-${String(boxCounter).padStart(3, '0')}`,
-            item_name: item.item_type,      // ✅ FIXED: Set item_name field
-            item_type: item.item_type,       // ✅ FIXED: Also set item_type for compatibility
-            quantity: i === boxesForItem - 1 ? qtyPerBox + remainder : qtyPerBox,
-            consumed_quantity: 0,
-            remaining_quantity: null,         // Will be set when issued to production
-            barcode: `BC-${Date.now()}-${boxCounter}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
-            csv_file_name: material.csv_file_name,
-            status: 'Material In Stock',
-            created_by: receiptData.received_by,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          });
-          boxCounter++;
-        }
-      });
-
+    // Create boxes ONLY for this batch (batch_boxes contains only the newly confirmed ones)
+    if (receiptData.auto_create_boxes && receiptData.batch_boxes?.length > 0) {
+      const newBoxes = receiptData.batch_boxes.map((box, idx) => ({
+        id: Date.now() + idx + Math.random(),
+        inbound_material_id: material.id,
+        shipment_id:         material.shipment_id,
+        box_name:            box.box_name,
+        item_name:           box.item_name,
+        item_type:           box.item_type,
+        quantity:            box.quantity,
+        missing_qty:         box.missing_qty,
+        remarks:             box.remarks,
+        consumed_quantity:   0,
+        remaining_quantity:  null,
+        barcode:             box.barcode,
+        csv_file_name:       material.csv_file_name,
+        status:              'Material In Stock',
+        created_by:          receiptData.received_by,
+        created_at:          new Date().toISOString(),
+        updated_at:          new Date().toISOString(),
+      }));
       setBoxes(prev => [...prev, ...newBoxes]);
+    }
+
+    // Stay on inbound receiving page if partially received so manager can do next batch
+    if (receiptData.is_partial) {
+      // Don't navigate — page re-renders with updated receivedBoxKeys from material state
+      // The InboundReceiving component restores state from material.received_box_keys
+      return;
     }
 
     navigate('inbound-list');
@@ -734,6 +737,10 @@ const handleDeleteLocalCost = (costId) => {
   if (window.confirm('Are you sure you want to delete this expense?')) {
     setLocalCosts(prev => prev.filter(c => c.id !== costId));
   }
+};
+
+const handlePaymentSave = (finKey, payments) => {
+  setFinanceData(prev => ({ ...prev, [finKey]: payments }));
 };
 
   const renderContent = () => {
@@ -1079,6 +1086,15 @@ case 'production-floor':
     />
   );
 
+  case 'landing-cost':
+  return (
+    <LandingCost
+      lcs={lcs}
+      financeData={financeData}
+      onPaymentSave={handlePaymentSave}
+    />
+  );
+
 case 'local-costs':
   return (
     <LocalCosts
@@ -1089,15 +1105,7 @@ case 'local-costs':
     />
   );
 
-case 'cost-reports':
-  return (
-    <CostReports
-      lcs={lcs}
-      localCosts={localCosts}
-      subBoxes={subBoxes}
-      onNavigate={navigate}
-    />
-  );
+
 
 case 'profitability':
   return (
@@ -1109,6 +1117,16 @@ case 'profitability':
       onNavigate={navigate}
     />
   );
+  case 'cost-reports':
+  return (
+    <CostReports
+      lcs={lcs}
+      localCosts={localCosts}
+      subBoxes={subBoxes}
+      onNavigate={navigate}
+    />
+  );
+
 
       default:
         return <Dashboard lcs={lcs} onSelectLC={(lc) => navigate('lc-detail', lc)} />;
