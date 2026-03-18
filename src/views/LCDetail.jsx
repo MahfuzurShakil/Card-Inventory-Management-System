@@ -98,7 +98,7 @@ const LCDetail = ({ lc, onBack, onSelectShipment, onAddShipment }) => {
 
           {/* Section 2: Financial Details */}
           <div className="mb-8 pb-8 border-b border-gray-200">
-            <h3 className="text-sm font-semibold text-gray-500 uppercase mb-4">Financial Details</h3>
+            {/* <h3 className="text-sm font-semibold text-gray-500 uppercase mb-4">Financial Details</h3> */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               <div>
                 <p className="text-xs font-medium text-gray-500 uppercase mb-1">LC Value (Foreign)</p>
@@ -106,28 +106,7 @@ const LCDetail = ({ lc, onBack, onSelectShipment, onAddShipment }) => {
                   {lc.lc_currency} {lc.lc_value_foreign?.toLocaleString() || '0'}
                 </p>
               </div>
-              <div>
-                <p className="text-xs font-medium text-gray-500 uppercase mb-1">Exchange Rate</p>
-                <p className="text-xl font-bold text-purple-900">
-                  ৳{lc.exchange_rate || 'N/A'}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs font-medium text-gray-500 uppercase mb-1">LC Value (BDT)</p>
-                <p className="text-xl font-bold text-green-900">
-                  ৳{lc.lc_value_bdt?.toLocaleString() || '0'}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs font-medium text-gray-500 uppercase mb-1">Status</p>
-                <span className={`inline-block px-3 py-1 text-sm font-medium rounded-full ${
-                  lc.status === 'Active' ? 'bg-green-100 text-green-800' : 
-                  lc.status === 'Draft' ? 'bg-yellow-100 text-yellow-800' :
-                  'bg-gray-100 text-gray-800'
-                }`}>
-                  {lc.status}
-                </span>
-              </div>
+              
             </div>
           </div>
 

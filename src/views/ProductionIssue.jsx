@@ -1,24 +1,74 @@
-import { useState } from 'react';
-import { ChevronRight, Scan, Package, AlertCircle, Calendar, Clock, Users, X, CheckCircle, Plus, Cpu, Layers } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import {
+  ChevronRight, Scan, Package, AlertCircle, Calendar, Clock,
+  Users, X, CheckCircle, Plus, Cpu, Layers, AlertTriangle
+} from 'lucide-react';
+
+// ─── Helper ───────────────────────────────────────────────────────────────────
+const isChipBox = (box) =>
+  (box.item_type || '').toLowerCase() === 'chip' ||
+  (box.item_name || '').toLowerCase() === 'chip';
 
 const ProductionIssue = ({ boxes, employees, productionAssignments, onIssueBoxes, onBack }) => {
   const today = new Date().toISOString().split('T')[0];
 
-  const [barcodeInput, setBarcodeInput] = useState('');
+  const [barcodeInput, setBarcodeInput]   = useState('');
   const [selectedShift, setSelectedShift] = useState('Day');
-  const [issueDate, setIssueDate] = useState(today);
-  const [scannedBoxes, setScannedBoxes] = useState([]);
-  const [error, setError] = useState('');
+  const [issueDate, setIssueDate]         = useState(today);
+  const [scannedBoxes, setScannedBoxes]   = useState([]);
+  const [error, setError]                 = useState('');
   const [successMessage, setSuccessMessage] = useState('');
 
+  // ── Prior-shift gate: find previous shift's boxes that are still pending ──
+  // "Previous shift" = most recent shift (by date+shift) that has issued boxes
+  const priorShiftPendingBoxes = useMemo(() => {
+    // All boxes that are currently "Material In Production" or "Partially Consumed"
+    // i.e. issued to some shift that is NOT the current issueDate+selectedShift
+    const inProductionBoxes = boxes.filter(b =>
+      (b.status === 'Material In Production' || b.status === 'Partially Consumed') &&
+      b.issue_date &&
+      !(b.issue_date === issueDate && b.issue_shift === selectedShift)
+    );
+
+    // Find the latest prior shift
+    if (inProductionBoxes.length === 0) return [];
+
+    // Sort by date desc, then night before day for same date
+    const sorted = [...inProductionBoxes].sort((a, b) => {
+      const dateDiff = new Date(b.issue_date) - new Date(a.issue_date);
+      if (dateDiff !== 0) return dateDiff;
+      return a.issue_shift === 'Night' ? -1 : 1;
+    });
+    const latestDate  = sorted[0].issue_date;
+    const latestShift = sorted[0].issue_shift;
+
+    // Only flag boxes from that latest prior shift that haven't been updated
+    return inProductionBoxes.filter(b =>
+      b.issue_date  === latestDate &&
+      b.issue_shift === latestShift &&
+      !b.shift_updated
+    );
+  }, [boxes, issueDate, selectedShift]);
+
+  const priorShiftBlocked = priorShiftPendingBoxes.length > 0;
+  const priorShiftLabel   = priorShiftPendingBoxes.length > 0
+    ? `${priorShiftPendingBoxes[0].issue_date} — ${priorShiftPendingBoxes[0].issue_shift} Shift`
+    : '';
+
+  // ── Available "In Stock" boxes ────────────────────────────────────────────
   const availableBoxes = boxes.filter(b => b.status === 'Material In Stock');
 
-  const suggestedBoxes = boxes.filter(b =>
-    (b.item_name === 'Chip' || b.item_type === 'Chip') &&
-    b.status === 'Material In Production' &&
-    (b.remaining_quantity > 0)
-  ).sort((a, b) => a.remaining_quantity - b.remaining_quantity);
+  // ── Carry-over chip boxes (partial remaining from any prior shift) ────────
+  const carryOverBoxes = useMemo(() =>
+    boxes.filter(b =>
+      isChipBox(b) &&
+      (b.status === 'Material In Production' || b.status === 'Partially Consumed') &&
+      (b.remaining_quantity ?? 0) > 0
+    ).sort((a, b) => (a.remaining_quantity || 0) - (b.remaining_quantity || 0)),
+    [boxes]
+  );
 
+  // ── Shift assignments ─────────────────────────────────────────────────────
   const shiftAssignments = productionAssignments.filter(
     a => a.assignment_date === issueDate && a.shift === selectedShift
   );
@@ -29,16 +79,16 @@ const ProductionIssue = ({ boxes, employees, productionAssignments, onIssueBoxes
     if (employee && teamsBySegment[a.work_segment]) {
       teamsBySegment[a.work_segment].push({
         ...a,
-        employee_name: employee.name,
-        employee_id_number: employee.employee_id,
-        expertise: employee.expertise
+        employee_name:       employee.name,
+        employee_id_number:  employee.employee_id,
+        expertise:           employee.expertise,
       });
     }
   });
 
+  // ── Scan handler ──────────────────────────────────────────────────────────
   const handleScan = () => {
     setError('');
-    setSuccessMessage('');
     if (!barcodeInput.trim()) { setError('Please enter a barcode'); return; }
     if (scannedBoxes.find(b => b.barcode === barcodeInput.trim())) {
       setError('This box has already been scanned');
@@ -47,10 +97,11 @@ const ProductionIssue = ({ boxes, employees, productionAssignments, onIssueBoxes
     }
     const box = boxes.find(b => b.barcode === barcodeInput.trim());
     if (!box) { setError(`Box not found: ${barcodeInput}`); return; }
-    if (box.status !== 'Material In Stock' && box.status !== 'Material In Production') {
-      setError(`Cannot issue box: status is "${box.status}".`); return;
+    if (box.status !== 'Material In Stock' && box.status !== 'Material In Production' && box.status !== 'Partially Consumed') {
+      setError(`Cannot issue box with status "${box.status}".`); return;
     }
-    if (box.status === 'Material In Production' && (!box.remaining_quantity || box.remaining_quantity <= 0)) {
+    if ((box.status === 'Material In Production' || box.status === 'Partially Consumed') &&
+        (!box.remaining_quantity || box.remaining_quantity <= 0)) {
       setError('This box is already fully consumed.'); return;
     }
     if (shiftAssignments.length === 0) {
@@ -72,14 +123,15 @@ const ProductionIssue = ({ boxes, employees, productionAssignments, onIssueBoxes
   };
 
   const handleConfirmIssue = () => {
-    const chipBoxes = scannedBoxes.filter(b => b.item_name === 'Chip' || b.item_type === 'Chip');
-    if (chipBoxes.length === 0) { setError('At least 1 Chip box is required.'); return; }
+    const chipInList = scannedBoxes.filter(isChipBox);
+    if (chipInList.length === 0) { setError('At least 1 Chip box is required.'); return; }
+
     const issueData = {
-      box_ids: scannedBoxes.map(b => b.id),
+      box_ids:    scannedBoxes.map(b => b.id),
       issue_date: issueDate,
-      shift: selectedShift,
-      issued_by: 'Store Keeper',
-      issued_at: new Date().toISOString()
+      shift:      selectedShift,
+      issued_by:  'Store Keeper',
+      issued_at:  new Date().toISOString(),
     };
     onIssueBoxes(issueData);
     setSuccessMessage(`Successfully issued ${scannedBoxes.length} box${scannedBoxes.length !== 1 ? 'es' : ''} to ${selectedShift} shift!`);
@@ -89,19 +141,20 @@ const ProductionIssue = ({ boxes, employees, productionAssignments, onIssueBoxes
 
   const handleKeyPress = (e) => { if (e.key === 'Enter') handleScan(); };
 
-  const chipBoxes  = scannedBoxes.filter(b => b.item_name === 'Chip'  || b.item_type === 'Chip');
-  const tapeBoxes  = scannedBoxes.filter(b => b.item_name === 'Tape'  || b.item_type === 'Tape');
-  const sheetBoxes = scannedBoxes.filter(b => b.item_name === 'Sheet' || b.item_type === 'Sheet');
+  const chipBoxes  = scannedBoxes.filter(b => isChipBox(b));
+  const tapeBoxes  = scannedBoxes.filter(b => (b.item_name || b.item_type || '').toLowerCase() === 'tape');
+  const sheetBoxes = scannedBoxes.filter(b => (b.item_name || b.item_type || '').toLowerCase() === 'sheet');
 
   const itemColor = (name) => {
-    if (name === 'Chip')  return 'bg-blue-100 text-blue-800';
-    if (name === 'Tape')  return 'bg-purple-100 text-purple-800';
-    if (name === 'Sheet') return 'bg-emerald-100 text-emerald-800';
+    const n = (name || '').toLowerCase();
+    if (n === 'chip')  return 'bg-blue-100 text-blue-800';
+    if (n === 'tape')  return 'bg-purple-100 text-purple-800';
+    if (n === 'sheet') return 'bg-emerald-100 text-emerald-800';
     return 'bg-gray-100 text-gray-700';
   };
 
   const segmentColors = {
-    Cutting:    { dot: 'bg-blue-500',    badge: 'bg-blue-50 text-blue-700 border-blue-200'    },
+    Cutting:    { dot: 'bg-blue-500',    badge: 'bg-blue-50 text-blue-700 border-blue-200'       },
     Lamination: { dot: 'bg-purple-500',  badge: 'bg-purple-50 text-purple-700 border-purple-200' },
     Embedding:  { dot: 'bg-orange-500',  badge: 'bg-orange-50 text-orange-700 border-orange-200' },
     QC:         { dot: 'bg-emerald-500', badge: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
@@ -109,7 +162,8 @@ const ProductionIssue = ({ boxes, employees, productionAssignments, onIssueBoxes
 
   return (
     <div className="space-y-5">
-      {/* ── Header ─────────────────────────────────────────────────────────── */}
+
+      {/* ── Header ──────────────────────────────────────────────────────────── */}
       <div className="flex items-center gap-3">
         <button onClick={onBack} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
           <ChevronRight className="w-5 h-5 rotate-180 text-gray-500" />
@@ -120,7 +174,32 @@ const ProductionIssue = ({ boxes, employees, productionAssignments, onIssueBoxes
         </div>
       </div>
 
-      {/* Success banner */}
+      {/* ── Prior-shift gate banner ──────────────────────────────────────────── */}
+      {priorShiftBlocked && (
+        <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-xl px-5 py-4">
+          <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-semibold text-red-900">
+              Previous shift boxes not fully updated
+            </p>
+            <p className="text-xs text-red-700 mt-0.5">
+              <span className="font-medium">{priorShiftPendingBoxes.length} box{priorShiftPendingBoxes.length !== 1 ? 'es' : ''}</span> from{' '}
+              <span className="font-medium">{priorShiftLabel}</span> still need consumption updates.
+              Please go to Production Floor and update all boxes before issuing materials for the new shift.
+            </p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {priorShiftPendingBoxes.slice(0, 6).map(b => (
+                <span key={b.id} className="px-2 py-0.5 text-xs bg-red-100 text-red-700 rounded font-mono">{b.box_name}</span>
+              ))}
+              {priorShiftPendingBoxes.length > 6 && (
+                <span className="px-2 py-0.5 text-xs bg-red-100 text-red-700 rounded">+{priorShiftPendingBoxes.length - 6} more</span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Success banner ───────────────────────────────────────────────────── */}
       {successMessage && (
         <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
           <CheckCircle className="w-5 h-5 text-emerald-600 flex-shrink-0" />
@@ -131,10 +210,10 @@ const ProductionIssue = ({ boxes, employees, productionAssignments, onIssueBoxes
       {/* ── Two-column layout ───────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
 
-        {/* ── LEFT: Scan + Boxes ──────────────────────────────────────────── */}
+        {/* ── LEFT: Scan + Boxes ──────────────────────────────────────────────── */}
         <div className="lg:col-span-2 flex flex-col gap-0 bg-white rounded-xl border border-gray-200 overflow-hidden">
 
-          {/* Scan bar — top of card */}
+          {/* Scan bar */}
           <div className="p-5 border-b border-gray-100">
             <div className="flex items-center gap-2 mb-4">
               <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center flex-shrink-0">
@@ -153,12 +232,18 @@ const ProductionIssue = ({ boxes, employees, productionAssignments, onIssueBoxes
                 onChange={(e) => setBarcodeInput(e.target.value)}
                 onKeyPress={handleKeyPress}
                 placeholder="Scan or type barcode here..."
-                className="flex-1 px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg font-mono text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:bg-white transition-all"
-                autoFocus
+                disabled={priorShiftBlocked}
+                className={`flex-1 px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg font-mono text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:bg-white transition-all ${
+                  priorShiftBlocked ? 'opacity-50 cursor-not-allowed' : ''}`}
+                autoFocus={!priorShiftBlocked}
               />
               <button
                 onClick={handleScan}
-                className="px-5 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
+                disabled={priorShiftBlocked}
+                className={`px-5 py-2.5 text-white text-sm font-semibold rounded-lg transition-colors shadow-sm ${
+                  priorShiftBlocked
+                    ? 'bg-gray-300 cursor-not-allowed'
+                    : 'bg-blue-600 hover:bg-blue-700'}`}
               >
                 Add Box
               </button>
@@ -172,28 +257,52 @@ const ProductionIssue = ({ boxes, employees, productionAssignments, onIssueBoxes
             )}
           </div>
 
-          {/* Suggested boxes — inline section, only when present */}
-          {suggestedBoxes.filter(s => !scannedBoxes.find(b => b.id === s.id)).length > 0 && (
-            <div className="px-5 py-3 bg-amber-50 border-b border-amber-100">
-              <p className="text-xs font-semibold text-amber-800 mb-2 flex items-center gap-1.5">
-                <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-                Suggested — finish these partially consumed chip boxes first
+          {/* ── Carry-over chip boxes section ─────────────────────────────────── */}
+          {!priorShiftBlocked && carryOverBoxes.filter(s => !scannedBoxes.find(b => b.id === s.id)).length > 0 && (
+            <div className="px-5 py-3.5 bg-amber-50 border-b border-amber-100">
+              <p className="text-xs font-semibold text-amber-800 mb-2.5 flex items-center gap-1.5">
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0"></span>
+                Carry-over chip boxes — finish these first
               </p>
-              <div className="flex flex-wrap gap-2">
-                {suggestedBoxes
+              <div className="flex flex-col gap-2">
+                {carryOverBoxes
                   .filter(s => !scannedBoxes.find(b => b.id === s.id))
                   .slice(0, 4)
-                  .map(box => (
-                    <button
-                      key={box.id}
-                      onClick={() => handleAutoAddSuggested(box)}
-                      className="flex items-center gap-2 px-3 py-1.5 bg-white border border-amber-200 hover:border-amber-400 rounded-lg text-xs transition-colors group"
-                    >
-                      <span className="font-medium text-gray-800">{box.box_name}</span>
-                      <span className="text-gray-400">{box.remaining_quantity?.toLocaleString()} left</span>
-                      <Plus className="w-3.5 h-3.5 text-amber-600 group-hover:text-amber-800" />
-                    </button>
-                  ))}
+                  .map(box => {
+                    const totalQty = box.quantity || 0;
+                    const remaining = box.remaining_quantity || 0;
+                    const pct = totalQty > 0 ? Math.round((remaining / totalQty) * 100) : 0;
+                    return (
+                      <button
+                        key={box.id}
+                        onClick={() => handleAutoAddSuggested(box)}
+                        className="flex items-center gap-3 px-3 py-2.5 bg-white border border-amber-200 hover:border-amber-400 hover:bg-amber-50 rounded-xl text-xs transition-colors group text-left"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="font-semibold text-gray-900">{box.box_name}</span>
+                            <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 text-xs font-semibold rounded">carry-over</span>
+                            {box.issue_date && (
+                              <span className="text-gray-400">from {box.issue_date} {box.issue_shift}</span>
+                            )}
+                          </div>
+                          {/* Mini progress bar */}
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1 bg-gray-200 rounded-full h-1.5">
+                              <div
+                                className="bg-amber-400 rounded-full h-1.5 transition-all"
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                            <span className="text-gray-600 font-medium whitespace-nowrap">
+                              {remaining.toLocaleString()} / {totalQty.toLocaleString()} remaining
+                            </span>
+                          </div>
+                        </div>
+                        <Plus className="w-4 h-4 text-amber-600 group-hover:text-amber-800 flex-shrink-0" />
+                      </button>
+                    );
+                  })}
               </div>
             </div>
           )}
@@ -201,11 +310,14 @@ const ProductionIssue = ({ boxes, employees, productionAssignments, onIssueBoxes
           {/* Scanned boxes list */}
           {scannedBoxes.length > 0 ? (
             <>
-              {/* Sub-header with material summary pills */}
+              {/* Summary pills */}
               <div className="px-5 py-3 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
-                <p className="text-xs font-semibold text-gray-600">{scannedBoxes.length} box{scannedBoxes.length !== 1 ? 'es' : ''} queued</p>
+                <p className="text-xs font-semibold text-gray-600">
+                  {scannedBoxes.length} box{scannedBoxes.length !== 1 ? 'es' : ''} queued
+                </p>
                 <div className="flex gap-1.5">
-                  <span className={`px-2.5 py-0.5 text-xs font-semibold rounded-full ${chipBoxes.length > 0 ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-400'}`}>
+                  <span className={`px-2.5 py-0.5 text-xs font-semibold rounded-full ${
+                    chipBoxes.length > 0 ? 'bg-blue-100 text-blue-800' : 'bg-red-100 text-red-700'}`}>
                     Chip {chipBoxes.length}{chipBoxes.length === 0 && ' ✗'}
                   </span>
                   <span className="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-purple-100 text-purple-800">
@@ -220,35 +332,37 @@ const ProductionIssue = ({ boxes, employees, productionAssignments, onIssueBoxes
               {/* Box rows */}
               <div className="divide-y divide-gray-100">
                 {scannedBoxes.map(box => {
-                  const isChip    = box.item_name === 'Chip'  || box.item_type === 'Chip';
-                  const isPartial = box.status === 'Material In Production' && box.remaining_quantity > 0;
-                  const qty       = isPartial ? box.remaining_quantity : box.quantity;
-                  const typeName  = box.item_name || box.item_type;
+                  const isPartial  = box.status === 'Material In Production' || box.status === 'Partially Consumed';
+                  const qty        = isPartial && box.remaining_quantity ? box.remaining_quantity : (box.quantity || 0);
+                  const typeName   = box.item_name || box.item_type || '';
+                  const isCarryOver = box.carry_over || isPartial;
 
                   return (
                     <div key={box.id} className="px-5 py-3 flex items-center gap-4 hover:bg-gray-50 transition-colors">
-                      <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${itemColor(typeName).replace('text-', 'text-').replace('bg-', 'bg-')}`} style={{opacity: 0.8}}>
+                      <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${itemColor(typeName)}`}>
                         <Package className="w-3.5 h-3.5" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <p className="text-sm font-semibold text-gray-900 truncate">{box.box_name}</p>
-                          <span className={`px-2 py-0.5 text-xs font-medium rounded-full flex-shrink-0 ${itemColor(typeName)}`}>
+                          <span className={`px-1.5 py-0.5 text-xs font-semibold rounded-full ${itemColor(typeName)}`}>
                             {typeName}
                           </span>
-                          {isPartial && (
-                            <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-amber-100 text-amber-700 flex-shrink-0">Partial</span>
+                          {isCarryOver && (
+                            <span className="px-1.5 py-0.5 text-xs font-semibold bg-amber-100 text-amber-700 rounded">
+                              carry-over
+                            </span>
                           )}
                         </div>
-                        <p className="text-xs text-gray-400 font-mono mt-0.5 truncate">{box.barcode}</p>
-                      </div>
-                      <div className="text-right flex-shrink-0">
-                        <p className="text-sm font-bold text-gray-900">{qty.toLocaleString()}</p>
-                        <p className="text-xs text-gray-400">units</p>
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          {isChipBox(box)
+                            ? `${qty.toLocaleString()} chips ${isCarryOver ? 'remaining' : 'total'}`
+                            : `${(box.quantity || 0).toLocaleString()} units`}
+                        </p>
                       </div>
                       <button
                         onClick={() => handleRemoveBox(box.id)}
-                        className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors flex-shrink-0"
+                        className="p-1.5 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded-lg transition-colors"
                       >
                         <X className="w-4 h-4" />
                       </button>
@@ -257,59 +371,56 @@ const ProductionIssue = ({ boxes, employees, productionAssignments, onIssueBoxes
                 })}
               </div>
 
-              {/* Action footer */}
-              <div className="px-5 py-4 border-t border-gray-100 bg-gray-50 flex items-center justify-between">
-                <button
-                  onClick={() => setScannedBoxes([])}
-                  className="px-4 py-2 text-sm text-gray-500 hover:text-gray-800 hover:bg-white border border-gray-200 rounded-lg transition-colors"
-                >
-                  Clear All
-                </button>
+              {/* Confirm button */}
+              <div className="px-5 py-4 border-t border-gray-100 bg-gray-50">
                 <button
                   onClick={handleConfirmIssue}
-                  disabled={chipBoxes.length === 0}
-                  className="px-6 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm"
+                  disabled={chipBoxes.length === 0 || priorShiftBlocked}
+                  className={`w-full py-2.5 text-sm font-semibold rounded-lg transition-colors shadow-sm ${
+                    chipBoxes.length === 0 || priorShiftBlocked
+                      ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                      : 'bg-green-600 text-white hover:bg-green-700'
+                  }`}
                 >
                   {chipBoxes.length === 0
                     ? 'Chip box required'
-                    : `Issue ${scannedBoxes.length} Box${scannedBoxes.length !== 1 ? 'es' : ''} to Production`}
+                    : `Issue ${scannedBoxes.length} Box${scannedBoxes.length !== 1 ? 'es' : ''} to ${selectedShift} Shift`}
                 </button>
               </div>
             </>
           ) : (
             /* Empty state */
-            <div className="flex flex-col items-center justify-center py-14 text-gray-300">
+            <div className="flex flex-col items-center justify-center py-14">
               <div className="w-14 h-14 rounded-xl bg-gray-100 flex items-center justify-center mb-3">
                 <Package className="w-7 h-7 text-gray-300" />
               </div>
               <p className="text-sm font-medium text-gray-400">No boxes scanned yet</p>
-              <p className="text-xs text-gray-300 mt-1">Scan a barcode above to begin</p>
+              <p className="text-xs text-gray-300 mt-1">
+                {priorShiftBlocked ? 'Resolve prior shift updates first' : 'Scan a barcode above to begin'}
+              </p>
             </div>
           )}
         </div>
 
-        {/* ── RIGHT: Shift context + Team ─────────────────────────────────── */}
+        {/* ── RIGHT: Shift context + Team ─────────────────────────────────────── */}
         <div className="flex flex-col gap-4">
 
           {/* Date & Shift selector */}
           <div className="bg-white rounded-xl border border-gray-200 p-5">
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-4">Issue Context</p>
-
             <div className="space-y-4">
-              {/* Date */}
+
               <div>
                 <label className="flex items-center gap-1.5 text-xs font-medium text-gray-600 mb-1.5">
                   <Calendar className="w-3.5 h-3.5" /> Issue Date
                 </label>
                 <input
-                  type="date"
-                  value={issueDate}
+                  type="date" value={issueDate}
                   onChange={(e) => setIssueDate(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-gray-50"
                 />
               </div>
 
-              {/* Shift */}
               <div>
                 <label className="flex items-center gap-1.5 text-xs font-medium text-gray-600 mb-1.5">
                   <Clock className="w-3.5 h-3.5" /> Shift
@@ -318,27 +429,31 @@ const ProductionIssue = ({ boxes, employees, productionAssignments, onIssueBoxes
                   <button
                     onClick={() => setSelectedShift('Day')}
                     className={`py-2.5 text-sm font-semibold rounded-lg transition-colors ${
-                      selectedShift === 'Day'
-                        ? 'bg-amber-500 text-white shadow-sm'
-                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      selectedShift === 'Day' ? 'bg-amber-500 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                     }`}
-                  >
-                    ☀ Day
-                  </button>
+                  >☀ Day</button>
                   <button
                     onClick={() => setSelectedShift('Night')}
                     className={`py-2.5 text-sm font-semibold rounded-lg transition-colors ${
-                      selectedShift === 'Night'
-                        ? 'bg-indigo-600 text-white shadow-sm'
-                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      selectedShift === 'Night' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                     }`}
-                  >
-                    ☽ Night
-                  </button>
+                  >☽ Night</button>
                 </div>
               </div>
 
-              {/* Assignment status indicator */}
+              {/* Gate status */}
+              <div className={`flex items-start gap-2 px-3 py-2.5 rounded-lg text-xs font-medium ${
+                priorShiftBlocked
+                  ? 'bg-red-50 text-red-700 border border-red-200'
+                  : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+              }`}>
+                <div className={`w-2 h-2 rounded-full flex-shrink-0 mt-0.5 ${priorShiftBlocked ? 'bg-red-400' : 'bg-emerald-500'}`} />
+                {priorShiftBlocked
+                  ? `Blocked — ${priorShiftPendingBoxes.length} prior-shift box${priorShiftPendingBoxes.length !== 1 ? 'es' : ''} need update`
+                  : 'Ready to issue'}
+              </div>
+
+              {/* Assignment status */}
               <div className={`flex items-center gap-2 px-3 py-2.5 rounded-lg text-xs font-medium ${
                 shiftAssignments.length > 0
                   ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
@@ -359,7 +474,6 @@ const ProductionIssue = ({ boxes, employees, productionAssignments, onIssueBoxes
                 <Users className="w-4 h-4 text-gray-400" />
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest">Team on Shift</p>
               </div>
-
               <div className="space-y-3">
                 {Object.entries(teamsBySegment).map(([segment, members]) => {
                   const colors = segmentColors[segment];
@@ -387,8 +501,6 @@ const ProductionIssue = ({ boxes, employees, productionAssignments, onIssueBoxes
                     </div>
                   );
                 })}
-
-                {/* Segments with no members */}
                 {Object.entries(teamsBySegment).some(([, m]) => m.length === 0) && (
                   <div className="pt-2 border-t border-gray-100">
                     <p className="text-xs text-gray-400 mb-1">Not assigned:</p>
@@ -405,7 +517,6 @@ const ProductionIssue = ({ boxes, employees, productionAssignments, onIssueBoxes
             </div>
           )}
 
-          {/* No assignment state */}
           {shiftAssignments.length === 0 && (
             <div className="bg-white rounded-xl border border-gray-200 p-5 flex flex-col items-center text-center">
               <div className="w-10 h-10 bg-gray-100 rounded-xl flex items-center justify-center mb-3">
