@@ -9,6 +9,10 @@ const isChipBox = (box) =>
   (box.item_type || '').toLowerCase() === 'chip' ||
   (box.item_name || '').toLowerCase() === 'chip';
 
+// Check if a box has been updated for a specific date+shift using shiftConsumptionLog
+const boxHasLogEntry = (box, date, shift) =>
+  (box.shiftConsumptionLog || []).some(l => l.date === date && l.shift === shift);
+
 const ProductionIssue = ({ boxes, employees, productionAssignments, onIssueBoxes, onBack }) => {
   const today = new Date().toISOString().split('T')[0];
 
@@ -19,34 +23,42 @@ const ProductionIssue = ({ boxes, employees, productionAssignments, onIssueBoxes
   const [error, setError]                 = useState('');
   const [successMessage, setSuccessMessage] = useState('');
 
-  // ── Prior-shift gate: find previous shift's boxes that are still pending ──
-  // "Previous shift" = most recent shift (by date+shift) that has issued boxes
+  // ── Prior-shift gate ──────────────────────────────────────────────────────
+  // Find boxes that were issued to a previous shift but have NOT been logged
+  // (no shiftConsumptionLog entry for their issue_date + issue_shift).
+  // A box is "done" if:
+  //   - it is fully Consumed (status === 'Consumed'), OR
+  //   - it has a shiftConsumptionLog entry for its issue shift
   const priorShiftPendingBoxes = useMemo(() => {
-    // All boxes that are currently "Material In Production" or "Partially Consumed"
-    // i.e. issued to some shift that is NOT the current issueDate+selectedShift
-    const inProductionBoxes = boxes.filter(b =>
-      (b.status === 'Material In Production' || b.status === 'Partially Consumed') &&
-      b.issue_date &&
-      !(b.issue_date === issueDate && b.issue_shift === selectedShift)
-    );
+    // Collect all boxes currently in production (not yet consumed globally)
+    // that were issued to a shift OTHER than the current issueDate+selectedShift
+    const inProductionBoxes = boxes.filter(b => {
+      const isCurrentShift = b.issue_date === issueDate && b.issue_shift === selectedShift;
+      if (isCurrentShift) return false;
+      if (!b.issue_date || !b.issue_shift) return false;
+      // Only care about boxes that are still active (not fully consumed)
+      if (b.status === 'Consumed') return false;
+      return b.status === 'Material In Production';
+    });
 
-    // Find the latest prior shift
     if (inProductionBoxes.length === 0) return [];
 
-    // Sort by date desc, then night before day for same date
+    // Find the most recent prior shift
     const sorted = [...inProductionBoxes].sort((a, b) => {
       const dateDiff = new Date(b.issue_date) - new Date(a.issue_date);
       if (dateDiff !== 0) return dateDiff;
+      // Night shift is "later" than Day shift on the same date
       return a.issue_shift === 'Night' ? -1 : 1;
     });
+
     const latestDate  = sorted[0].issue_date;
     const latestShift = sorted[0].issue_shift;
 
-    // Only flag boxes from that latest prior shift that haven't been updated
+    // From that latest prior shift, find boxes that haven't been logged yet
     return inProductionBoxes.filter(b =>
       b.issue_date  === latestDate &&
       b.issue_shift === latestShift &&
-      !b.shift_updated
+      !boxHasLogEntry(b, latestDate, latestShift)
     );
   }, [boxes, issueDate, selectedShift]);
 
@@ -60,11 +72,18 @@ const ProductionIssue = ({ boxes, employees, productionAssignments, onIssueBoxes
 
   // ── Carry-over chip boxes (partial remaining from any prior shift) ────────
   const carryOverBoxes = useMemo(() =>
-    boxes.filter(b =>
-      isChipBox(b) &&
-      (b.status === 'Material In Production' || b.status === 'Partially Consumed') &&
-      (b.remaining_quantity ?? 0) > 0
-    ).sort((a, b) => (a.remaining_quantity || 0) - (b.remaining_quantity || 0)),
+    boxes.filter(b => {
+      if (!isChipBox(b)) return false;
+      if (b.status === 'Consumed') return false;
+      if (b.status !== 'Material In Production') return false;
+      // Must have remaining chips
+      const remaining = b.remaining_quantity ?? Math.max(0, (b.quantity || 0) - (b.consumed_quantity || 0));
+      return remaining > 0;
+    }).sort((a, b) => {
+      const remA = a.remaining_quantity ?? Math.max(0, (a.quantity || 0) - (a.consumed_quantity || 0));
+      const remB = b.remaining_quantity ?? Math.max(0, (b.quantity || 0) - (b.consumed_quantity || 0));
+      return remA - remB;
+    }),
     [boxes]
   );
 
@@ -97,15 +116,26 @@ const ProductionIssue = ({ boxes, employees, productionAssignments, onIssueBoxes
     }
     const box = boxes.find(b => b.barcode === barcodeInput.trim());
     if (!box) { setError(`Box not found: ${barcodeInput}`); return; }
-    if (box.status !== 'Material In Stock' && box.status !== 'Material In Production' && box.status !== 'Partially Consumed') {
-      setError(`Cannot issue box with status "${box.status}".`); return;
+
+    if (box.status === 'Consumed') {
+      setError(`This box is fully consumed and cannot be re-issued.`);
+      return;
     }
-    if ((box.status === 'Material In Production' || box.status === 'Partially Consumed') &&
-        (!box.remaining_quantity || box.remaining_quantity <= 0)) {
-      setError('This box is already fully consumed.'); return;
+    if (box.status !== 'Material In Stock' && box.status !== 'Material In Production') {
+      setError(`Cannot issue box with status "${box.status}".`);
+      return;
+    }
+    // For chip carry-overs: check there are remaining chips
+    if (box.status === 'Material In Production' && isChipBox(box)) {
+      const remaining = box.remaining_quantity ?? Math.max(0, (box.quantity || 0) - (box.consumed_quantity || 0));
+      if (remaining <= 0) {
+        setError('This chip box is fully consumed and has no remaining chips.');
+        return;
+      }
     }
     if (shiftAssignments.length === 0) {
-      setError(`No employees assigned to ${selectedShift} shift. Please assign employees first.`); return;
+      setError(`No employees assigned to ${selectedShift} shift on ${issueDate}. Please assign employees first.`);
+      return;
     }
     setScannedBoxes(prev => [...prev, box]);
     setBarcodeInput('');
@@ -184,8 +214,8 @@ const ProductionIssue = ({ boxes, employees, productionAssignments, onIssueBoxes
             </p>
             <p className="text-xs text-red-700 mt-0.5">
               <span className="font-medium">{priorShiftPendingBoxes.length} box{priorShiftPendingBoxes.length !== 1 ? 'es' : ''}</span> from{' '}
-              <span className="font-medium">{priorShiftLabel}</span> still need consumption updates.
-              Please go to Production Floor and update all boxes before issuing materials for the new shift.
+              <span className="font-medium">{priorShiftLabel}</span> still need consumption updates on the Production Floor.
+              Please update those boxes before issuing materials for the new shift.
             </p>
             <div className="mt-2 flex flex-wrap gap-1.5">
               {priorShiftPendingBoxes.slice(0, 6).map(b => (
@@ -257,11 +287,11 @@ const ProductionIssue = ({ boxes, employees, productionAssignments, onIssueBoxes
             )}
           </div>
 
-          {/* ── Carry-over chip boxes section ─────────────────────────────────── */}
+          {/* ── Carry-over chip boxes suggestion ─────────────────────────────── */}
           {!priorShiftBlocked && carryOverBoxes.filter(s => !scannedBoxes.find(b => b.id === s.id)).length > 0 && (
             <div className="px-5 py-3.5 bg-amber-50 border-b border-amber-100">
               <p className="text-xs font-semibold text-amber-800 mb-2.5 flex items-center gap-1.5">
-                <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0"></span>
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
                 Carry-over chip boxes — finish these first
               </p>
               <div className="flex flex-col gap-2">
@@ -269,9 +299,9 @@ const ProductionIssue = ({ boxes, employees, productionAssignments, onIssueBoxes
                   .filter(s => !scannedBoxes.find(b => b.id === s.id))
                   .slice(0, 4)
                   .map(box => {
-                    const totalQty = box.quantity || 0;
-                    const remaining = box.remaining_quantity || 0;
-                    const pct = totalQty > 0 ? Math.round((remaining / totalQty) * 100) : 0;
+                    const totalQty   = box.quantity || 0;
+                    const remaining  = box.remaining_quantity ?? Math.max(0, totalQty - (box.consumed_quantity || 0));
+                    const pct        = totalQty > 0 ? Math.round((remaining / totalQty) * 100) : 0;
                     return (
                       <button
                         key={box.id}
@@ -286,7 +316,6 @@ const ProductionIssue = ({ boxes, employees, productionAssignments, onIssueBoxes
                               <span className="text-gray-400">from {box.issue_date} {box.issue_shift}</span>
                             )}
                           </div>
-                          {/* Mini progress bar */}
                           <div className="flex items-center gap-2">
                             <div className="flex-1 bg-gray-200 rounded-full h-1.5">
                               <div
@@ -332,10 +361,11 @@ const ProductionIssue = ({ boxes, employees, productionAssignments, onIssueBoxes
               {/* Box rows */}
               <div className="divide-y divide-gray-100">
                 {scannedBoxes.map(box => {
-                  const isPartial  = box.status === 'Material In Production' || box.status === 'Partially Consumed';
-                  const qty        = isPartial && box.remaining_quantity ? box.remaining_quantity : (box.quantity || 0);
-                  const typeName   = box.item_name || box.item_type || '';
-                  const isCarryOver = box.carry_over || isPartial;
+                  const isCarryOver = box.status === 'Material In Production';
+                  const remaining   = isCarryOver
+                    ? (box.remaining_quantity ?? Math.max(0, (box.quantity || 0) - (box.consumed_quantity || 0)))
+                    : (box.quantity || 0);
+                  const typeName    = box.item_name || box.item_type || '';
 
                   return (
                     <div key={box.id} className="px-5 py-3 flex items-center gap-4 hover:bg-gray-50 transition-colors">
@@ -356,7 +386,7 @@ const ProductionIssue = ({ boxes, employees, productionAssignments, onIssueBoxes
                         </div>
                         <p className="text-xs text-gray-400 mt-0.5">
                           {isChipBox(box)
-                            ? `${qty.toLocaleString()} chips ${isCarryOver ? 'remaining' : 'total'}`
+                            ? `${remaining.toLocaleString()} chips ${isCarryOver ? 'remaining' : 'total'}`
                             : `${(box.quantity || 0).toLocaleString()} units`}
                         </p>
                       </div>
@@ -417,7 +447,7 @@ const ProductionIssue = ({ boxes, employees, productionAssignments, onIssueBoxes
                 <input
                   type="date" value={issueDate}
                   onChange={(e) => setIssueDate(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-gray-50"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-gray-50"
                 />
               </div>
 
@@ -449,7 +479,7 @@ const ProductionIssue = ({ boxes, employees, productionAssignments, onIssueBoxes
               }`}>
                 <div className={`w-2 h-2 rounded-full flex-shrink-0 mt-0.5 ${priorShiftBlocked ? 'bg-red-400' : 'bg-emerald-500'}`} />
                 {priorShiftBlocked
-                  ? `Blocked — ${priorShiftPendingBoxes.length} prior-shift box${priorShiftPendingBoxes.length !== 1 ? 'es' : ''} need update`
+                  ? `Blocked — ${priorShiftPendingBoxes.length} prior-shift box${priorShiftPendingBoxes.length !== 1 ? 'es' : ''} need update on Production Floor`
                   : 'Ready to issue'}
               </div>
 

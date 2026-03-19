@@ -30,7 +30,7 @@ const ProductionFloor = ({
   // ── Existing summary for this date+shift ─────────────────────────────────
   const getExistingSummary = (date, shift) => {
     const s = shiftSummaries.find(s => s.date === date && s.shift === shift);
-    return s || { chips_used: 0, qc_good: 0, wastage: 0, remarks: '' };
+    return s || { qc_good: 0, wastage: 0, remarks: '' };
   };
 
   const [shiftSummary, setShiftSummary] = useState(getExistingSummary(selectedDate, selectedShift));
@@ -41,60 +41,80 @@ const ProductionFloor = ({
     setSummaryErrors({});
   }, [selectedDate, selectedShift, shiftSummaries]);
 
-  // ── Boxes for this shift ──────────────────────────────────────────────────
-  // Shows:
-  //   1. Boxes natively issued to this date+shift (all statuses including Consumed)
-  //   2. Carry-over boxes from another shift that target this date+shift via
-  //      carry_over_date / carry_over_shift fields — shown as read-only here
-  //
-  // Carry-over boxes remain visible on their ORIGINAL shift too (locked there).
-
+  // ── Boxes visible for this shift ──────────────────────────────────────────
+  // A box appears here if:
+  //   1. It was originally issued to this date+shift (native), OR
+  //   2. It has a shiftConsumptionLog entry for this date+shift (carry-over used here)
   const shiftBoxes = useMemo(() => {
-    // Native: issued to this shift
-    const native = boxes.filter(b =>
-      b.issue_date  === selectedDate &&
-      b.issue_shift === selectedShift &&
-      (b.status === 'Material In Production' ||
-       b.status === 'Consumed' ||
-       b.status === 'Partially Consumed')
-    );
+    const seen = new Set();
+    const result = [];
 
-    // Carry-overs from other shifts pointed at this shift
-    const carryOvers = boxes.filter(b => {
+    boxes.forEach(b => {
       const isNative = b.issue_date === selectedDate && b.issue_shift === selectedShift;
-      if (isNative) return false;
-      if (!b.carry_over) return false;
-      return b.carry_over_date === selectedDate && b.carry_over_shift === selectedShift;
+
+      const logEntry = (b.shiftConsumptionLog || []).find(
+        l => l.date === selectedDate && l.shift === selectedShift
+      );
+
+      if ((isNative || logEntry) && !seen.has(b.id)) {
+        seen.add(b.id);
+        result.push(b);
+      }
     });
 
-    return [...native, ...carryOvers];
+    // Sort: native first, then carry-overs
+    return result.sort((a, b) => {
+      const aNative = a.issue_date === selectedDate && a.issue_shift === selectedShift;
+      const bNative = b.issue_date === selectedDate && b.issue_shift === selectedShift;
+      if (aNative && !bNative) return -1;
+      if (!aNative && bNative) return 1;
+      return 0;
+    });
   }, [boxes, selectedDate, selectedShift]);
 
-  // ── Chip totals — native chip boxes only for cross-validation ────────────
-  const chipBoxes         = shiftBoxes.filter(isChipBox);
-  const nativeChipBoxes   = chipBoxes.filter(b =>
-    b.issue_date === selectedDate && b.issue_shift === selectedShift
-  );
-  const totalChipQty       = chipBoxes.reduce((s, b) => s + (b.quantity || 0), 0);
-  const totalConsumedChip  = nativeChipBoxes.reduce((s, b) => s + (b.consumed_quantity || 0), 0);
-  const totalRemainingChip = chipBoxes.reduce((s, b) => {
-    const rem = b.remaining_quantity ?? ((b.quantity || 0) - (b.consumed_quantity || 0));
-    return s + Math.max(0, rem);
-  }, 0);
+  // ── Per-shift consumed from log ───────────────────────────────────────────
+  const getShiftConsumed = (box) => {
+    const entry = (box.shiftConsumptionLog || []).find(
+      l => l.date === selectedDate && l.shift === selectedShift
+    );
+    return entry ? entry.consumed : 0;
+  };
 
-  // ── Pending updates — native non-consumed boxes ───────────────────────────
-  const nativeBoxes     = shiftBoxes.filter(b =>
+  // ── Auto-calculated chips used this shift ─────────────────────────────────
+  const autoChipsUsed = useMemo(() => {
+    return shiftBoxes
+      .filter(isChipBox)
+      .reduce((sum, b) => sum + getShiftConsumed(b), 0);
+  }, [shiftBoxes, selectedDate, selectedShift]);
+
+  // ── Pending updates — native non-consumed boxes without a log entry ───────
+  const nativeBoxes = shiftBoxes.filter(b =>
     b.issue_date === selectedDate && b.issue_shift === selectedShift
   );
-  const pendingBoxes    = nativeBoxes.filter(b => !b.shift_updated && b.status !== 'Consumed');
+
+  const pendingBoxes = nativeBoxes.filter(b => {
+    // A box is pending if it hasn't been updated for THIS shift yet
+    const hasLogEntry = (b.shiftConsumptionLog || []).some(
+      l => l.date === selectedDate && l.shift === selectedShift
+    );
+    // For chip boxes: pending if no log entry and not fully consumed
+    // For tape/sheet: pending if no log entry
+    const isFullyConsumed = b.status === 'Consumed';
+    return !hasLogEntry && !isFullyConsumed;
+  });
+
   const pendingCount    = pendingBoxes.length;
   const allBoxesUpdated = pendingCount === 0 && nativeBoxes.length > 0;
 
-  // ── Cross-validation ──────────────────────────────────────────────────────
-  const summaryChipsUsed = parseInt(shiftSummary.chips_used) ||
-    parseInt(shiftSummary.finished_product) || 0;
-  const chipDiff    = totalConsumedChip - summaryChipsUsed;
-  const chipValidOk = nativeChipBoxes.length === 0 || totalConsumedChip === summaryChipsUsed;
+  // ── Chip totals ───────────────────────────────────────────────────────────
+  const chipBoxes = shiftBoxes.filter(isChipBox);
+  const totalChipQty = chipBoxes.reduce((s, b) => s + (b.quantity || 0), 0);
+
+  // Total remaining across all chip boxes (current global state)
+  const totalRemainingChip = chipBoxes.reduce((s, b) => {
+    const rem = b.remaining_quantity ?? Math.max(0, (b.quantity || 0) - (b.consumed_quantity || 0));
+    return s + Math.max(0, rem);
+  }, 0);
 
   // ── Employees ─────────────────────────────────────────────────────────────
   const assignedEmployees = productionAssignments
@@ -119,6 +139,7 @@ const ProductionFloor = ({
     if (t === 'sheet') return 'bg-emerald-100 text-emerald-800';
     return 'bg-gray-100 text-gray-700';
   };
+
   const segmentColors = {
     Cutting:    { dot: 'bg-blue-500',    badge: 'bg-blue-50 text-blue-700 border-blue-200'          },
     Lamination: { dot: 'bg-purple-500',  badge: 'bg-purple-50 text-purple-700 border-purple-200'    },
@@ -130,56 +151,80 @@ const ProductionFloor = ({
   const handleUpdateBox = (boxId, updateData) => {
     const box = boxes.find(b => b.id === boxId);
     if (!box) return;
+
     const chip = isChipBox(box);
-    const updates = { shift_updated: true, updated_at: new Date().toISOString() };
+    const delta = parseInt(updateData.consumed_this_shift || 0); // chips consumed THIS shift
+
+    // Build the new log entry for this shift
+    const existingLog = box.shiftConsumptionLog || [];
+    const existingEntry = existingLog.find(l => l.date === selectedDate && l.shift === selectedShift);
+
+    let newLog;
+    if (existingEntry) {
+      // Update existing entry (user re-updated the same shift)
+      newLog = existingLog.map(l =>
+        l.date === selectedDate && l.shift === selectedShift
+          ? { ...l, consumed: (chip ? delta : 0), status: updateData.status || l.status, consumption_type: updateData.consumption_type }
+          : l
+      );
+    } else {
+      newLog = [
+        ...existingLog,
+        {
+          date: selectedDate,
+          shift: selectedShift,
+          consumed: chip ? delta : 0,
+          status: chip
+            ? (updateData.remaining_after <= 0 ? 'Consumed' : 'Partially Consumed')
+            : updateData.consumption_type === 'fully' ? 'Consumed' : 'Partially Consumed',
+          consumption_type: chip ? null : updateData.consumption_type,
+        }
+      ];
+    }
+
+    const updates = {
+      shiftConsumptionLog: newLog,
+      updated_at: new Date().toISOString(),
+    };
 
     if (chip) {
-      // consumed_this_update is the DELTA typed by user this session
-      const prevConsumed    = box.consumed_quantity || 0;
-      const prevRemaining   = box.remaining_quantity != null
+      const prevConsumed  = box.consumed_quantity || 0;
+      const prevRemaining = box.remaining_quantity != null
         ? box.remaining_quantity
         : Math.max(0, (box.quantity || 0) - prevConsumed);
-      const delta           = parseInt(updateData.consumed_this_update || 0);
       const newTotalConsumed = prevConsumed + delta;
       const newRemaining     = Math.max(0, prevRemaining - delta);
 
       updates.consumed_quantity  = newTotalConsumed;
       updates.remaining_quantity = newRemaining;
-      updates.status             = newRemaining <= 0 ? 'Consumed' : 'Partially Consumed';
+      updates.status             = newRemaining <= 0 ? 'Consumed' : 'Material In Production';
       updates.carry_over         = newRemaining > 0;
     } else {
-      // Tape / Sheet
       if (updateData.consumption_type === 'fully') {
         updates.status             = 'Consumed';
         updates.consumed_quantity  = box.quantity;
         updates.remaining_quantity = 0;
-        updates.consumption_type   = 'fully';
         updates.carry_over         = false;
       } else {
-        updates.status           = 'Partially Consumed';
-        updates.consumption_type = 'partially';
-        updates.carry_over       = true;  // auto carry-over
+        updates.status   = 'Material In Production';
+        updates.carry_over = true;
       }
     }
+
     if (updateData.remarks !== undefined) updates.remarks = updateData.remarks;
+
     onUpdateBoxConsumption(boxId, updates);
     setEditingBox(null);
   };
 
   // ── Summary save ──────────────────────────────────────────────────────────
   const handleSaveSummary = () => {
-    const errs     = {};
-    const qcGood   = parseInt(shiftSummary.qc_good)    || 0;
-    const wastage  = parseInt(shiftSummary.wastage)     || 0;
-    const chipsUsed = parseInt(shiftSummary.chips_used) ||
-      parseInt(shiftSummary.finished_product) || 0;
+    const errs    = {};
+    const qcGood  = parseInt(shiftSummary.qc_good)  || 0;
+    const wastage = parseInt(shiftSummary.wastage)   || 0;
 
     if (qcGood  < 0) errs.qc_good  = 'Cannot be negative';
     if (wastage < 0) errs.wastage  = 'Cannot be negative';
-
-    if (nativeChipBoxes.length > 0 && totalConsumedChip !== chipsUsed) {
-      errs.chip_mismatch = `Box-level chips consumed (${totalConsumedChip.toLocaleString()}) ≠ Chips Used (${chipsUsed.toLocaleString()}). Difference: ${Math.abs(chipDiff).toLocaleString()}.`;
-    }
 
     setSummaryErrors(errs);
     if (Object.keys(errs).length > 0) return;
@@ -187,9 +232,8 @@ const ProductionFloor = ({
     if (onUpdateShiftSummary) {
       onUpdateShiftSummary(selectedDate, selectedShift, {
         ...shiftSummary,
-        chips_used:       chipsUsed,
-        finished_product: chipsUsed,  // keep backward-compat
-        qc_good:          qcGood,
+        chips_used: autoChipsUsed,
+        qc_good:    qcGood,
         wastage,
       });
     }
@@ -198,7 +242,7 @@ const ProductionFloor = ({
 
   const handleSummaryChange = (field, value) => {
     setShiftSummary(prev => ({ ...prev, [field]: field === 'remarks' ? value : parseInt(value) || 0 }));
-    setSummaryErrors(prev => ({ ...prev, [field]: undefined, chip_mismatch: undefined }));
+    setSummaryErrors(prev => ({ ...prev, [field]: undefined }));
   };
 
   const handleCancelEdit = () => {
@@ -207,10 +251,22 @@ const ProductionFloor = ({
     setSummaryErrors({});
   };
 
-  const displayChipsUsed = shiftSummary.chips_used ?? shiftSummary.finished_product ?? 0;
-  const editChipsUsedVal = shiftSummary.chips_used != null
-    ? shiftSummary.chips_used
-    : shiftSummary.finished_product ?? '';
+  // ── Determine row display status for a box in this shift ─────────────────
+  const getBoxShiftStatus = (box) => {
+    const isNative = box.issue_date === selectedDate && box.issue_shift === selectedShift;
+    const logEntry = (box.shiftConsumptionLog || []).find(
+      l => l.date === selectedDate && l.shift === selectedShift
+    );
+
+    if (logEntry) {
+      return logEntry.status === 'Consumed' ? 'Consumed This Shift'
+        : logEntry.status === 'Partially Consumed' ? 'Partially Consumed'
+        : 'Updated';
+    }
+    if (!isNative) return 'Carry-Over (Pending)';
+    if (box.status === 'Consumed') return 'Consumed';
+    return 'Needs Update';
+  };
 
   return (
     <div className="space-y-5">
@@ -243,9 +299,16 @@ const ProductionFloor = ({
               <div>
                 <p className="text-sm font-semibold text-gray-900">Issued Boxes</p>
                 <p className="text-xs text-gray-400 mt-0.5">
-                  {nativeBoxes.length} native · {shiftBoxes.length - nativeBoxes.length} carry-over
+                  {nativeBoxes.length} issued to this shift
+                  {shiftBoxes.length - nativeBoxes.length > 0 && (
+                    <span className="text-amber-600 ml-2">
+                      · {shiftBoxes.length - nativeBoxes.length} carry-over active
+                    </span>
+                  )}
                   {chipBoxes.length > 0 && (
-                    <span className="ml-2 text-blue-600">· {totalRemainingChip.toLocaleString()} chips remaining</span>
+                    <span className="ml-2 text-blue-600">
+                      · {totalRemainingChip.toLocaleString()} chips remaining globally
+                    </span>
                   )}
                 </p>
               </div>
@@ -272,53 +335,58 @@ const ProductionFloor = ({
                       <th className="px-5 py-3 text-left   text-xs font-semibold text-gray-400 uppercase tracking-wide">Box</th>
                       <th className="px-4 py-3 text-left   text-xs font-semibold text-gray-400 uppercase tracking-wide">Type</th>
                       <th className="px-4 py-3 text-right  text-xs font-semibold text-gray-400 uppercase tracking-wide">Total Qty</th>
-                      <th className="px-4 py-3 text-right  text-xs font-semibold text-gray-400 uppercase tracking-wide">Consumed</th>
+                      <th className="px-4 py-3 text-right  text-xs font-semibold text-gray-400 uppercase tracking-wide">This Shift</th>
                       <th className="px-4 py-3 text-right  text-xs font-semibold text-gray-400 uppercase tracking-wide">Remaining</th>
-                      <th className="px-4 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wide">Status</th>
+                      <th className="px-4 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wide">Shift Status</th>
                       <th className="px-5 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wide">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {shiftBoxes.map(box => {
-                      const chip            = isChipBox(box);
-                      const totalQty        = box.quantity || 0;
-                      const consumed        = box.consumed_quantity || 0;
-                      const remaining       = box.remaining_quantity != null
+                      const chip          = isChipBox(box);
+                      const totalQty      = box.quantity || 0;
+                      const shiftConsumed = getShiftConsumed(box);
+                      const remaining     = box.remaining_quantity != null
                         ? box.remaining_quantity
-                        : Math.max(0, totalQty - consumed);
-                      const isFullyConsumed = box.status === 'Consumed';
-                      const isPartial       = box.status === 'Partially Consumed';
+                        : Math.max(0, totalQty - (box.consumed_quantity || 0));
 
-                      // Is this box native to the currently-viewed shift?
-                      const isNative        = box.issue_date === selectedDate && box.issue_shift === selectedShift;
-                      // Carry-over boxes shown HERE are locked — updates belong to the next shift
-                      const isCarryOverHere = !isNative && !!box.carry_over;
-                      const needsUpdate     = isNative && !box.shift_updated && !isFullyConsumed;
+                      const isNative     = box.issue_date === selectedDate && box.issue_shift === selectedShift;
+                      const shiftStatus  = getBoxShiftStatus(box);
+                      const isLockedHere = !isNative && shiftStatus !== 'Needs Update' && shiftStatus !== 'Carry-Over (Pending)';
+
+                      // Determine if this box still needs update in this shift
+                      const hasLogForThisShift = (box.shiftConsumptionLog || []).some(
+                        l => l.date === selectedDate && l.shift === selectedShift
+                      );
+                      const needsUpdate = !hasLogForThisShift && box.status !== 'Consumed';
+
+                      const rowBg = shiftStatus === 'Consumed This Shift' ? 'bg-gray-50/30'
+                        : shiftStatus === 'Partially Consumed' ? 'bg-amber-50/20'
+                        : !isNative ? 'bg-amber-50/30'
+                        : needsUpdate ? 'bg-orange-50/20'
+                        : '';
 
                       return (
-                        <tr key={box.id} className={`hover:bg-gray-50 transition-colors ${
-                          isCarryOverHere ? 'bg-amber-50/40' :
-                          needsUpdate     ? 'bg-orange-50/20' : ''
-                        }`}>
+                        <tr key={box.id} className={`hover:bg-gray-50 transition-colors ${rowBg}`}>
 
                           {/* Box name */}
                           <td className="px-5 py-3.5">
                             <div className="flex items-center gap-2 flex-wrap">
-                              {needsUpdate && (
-                                <div className="w-1.5 h-1.5 rounded-full bg-orange-400 flex-shrink-0" title="Pending update" />
+                              {needsUpdate && isNative && (
+                                <div className="w-1.5 h-1.5 rounded-full bg-orange-400 flex-shrink-0" />
                               )}
-                              <span className={`font-medium text-sm ${isCarryOverHere ? 'text-amber-800' : 'text-gray-900'}`}>
-                                {box.box_name}
-                              </span>
-                              {box.carry_over && (
+                              <span className="font-medium text-sm text-gray-900">{box.box_name}</span>
+                              {!isNative && (
                                 <span className="px-1.5 py-0.5 text-xs font-semibold bg-amber-100 text-amber-700 rounded">
                                   carry-over
                                 </span>
                               )}
-                              {isCarryOverHere && (
-                                <span className="text-xs text-amber-500 italic">prev shift</span>
-                              )}
                             </div>
+                            {!isNative && (
+                              <p className="text-xs text-gray-400 mt-0.5">
+                                Issued: {box.issue_date} {box.issue_shift}
+                              </p>
+                            )}
                           </td>
 
                           {/* Type badge */}
@@ -328,25 +396,27 @@ const ProductionFloor = ({
                             </span>
                           </td>
 
-                          {/* Total Qty — all types show quantity */}
+                          {/* Total Qty */}
                           <td className="px-4 py-3.5 text-right">
                             <span className="font-semibold text-gray-700">{totalQty.toLocaleString()}</span>
                           </td>
 
-                          {/* Consumed */}
+                          {/* This Shift consumed */}
                           <td className="px-4 py-3.5 text-right">
                             {chip ? (
-                              <span className={`font-semibold ${consumed > 0 ? 'text-orange-700' : 'text-gray-300'}`}>
-                                {consumed > 0 ? consumed.toLocaleString() : '—'}
+                              <span className={`font-semibold ${shiftConsumed > 0 ? 'text-orange-700' : 'text-gray-300'}`}>
+                                {shiftConsumed > 0 ? shiftConsumed.toLocaleString() : '—'}
                               </span>
                             ) : (
                               <span className="text-xs text-gray-500">
-                                {isFullyConsumed ? 'Full' : isPartial ? 'Partial' : '—'}
+                                {shiftStatus === 'Consumed This Shift' ? 'Full'
+                                  : shiftStatus === 'Partially Consumed' ? 'Partial'
+                                  : '—'}
                               </span>
                             )}
                           </td>
 
-                          {/* Remaining — chip only */}
+                          {/* Remaining */}
                           <td className="px-4 py-3.5 text-right">
                             {chip ? (
                               <span className={`font-semibold ${
@@ -360,29 +430,23 @@ const ProductionFloor = ({
                             )}
                           </td>
 
-                          {/* Status */}
+                          {/* Shift Status */}
                           <td className="px-4 py-3.5 text-center">
                             <span className={`px-2.5 py-0.5 text-xs font-medium rounded-full ${
-                              isFullyConsumed  ? 'bg-gray-100 text-gray-500'    :
-                              isPartial        ? 'bg-amber-100 text-amber-700'  :
-                              isCarryOverHere  ? 'bg-amber-50 text-amber-600 border border-amber-200' :
-                              needsUpdate      ? 'bg-orange-100 text-orange-700':
-                                                 'bg-blue-100 text-blue-700'
+                              shiftStatus === 'Consumed This Shift' ? 'bg-gray-100 text-gray-500'    :
+                              shiftStatus === 'Partially Consumed'  ? 'bg-amber-100 text-amber-700'  :
+                              shiftStatus === 'Updated'             ? 'bg-emerald-100 text-emerald-700' :
+                              shiftStatus === 'Carry-Over (Pending)'? 'bg-amber-50 text-amber-600 border border-amber-200' :
+                              needsUpdate                           ? 'bg-orange-100 text-orange-700':
+                                                                      'bg-blue-100 text-blue-700'
                             }`}>
-                              {isFullyConsumed ? 'Consumed'           :
-                               isPartial       ? 'Partially Consumed' :
-                               isCarryOverHere ? 'Carry-over'         :
-                               needsUpdate     ? 'Needs Update'       : 'In Production'}
+                              {shiftStatus}
                             </span>
                           </td>
 
                           {/* Action */}
                           <td className="px-5 py-3.5 text-center">
-                            {isCarryOverHere ? (
-                              <span className="inline-flex items-center gap-1 px-3 py-1.5 text-gray-400 text-xs font-medium border border-gray-200 rounded-lg bg-gray-50 select-none">
-                                <Lock className="w-3 h-3" /> Locked
-                              </span>
-                            ) : isFullyConsumed ? (
+                            {box.status === 'Consumed' && !needsUpdate && shiftStatus !== 'Needs Update' ? (
                               <span className="text-xs text-gray-300">—</span>
                             ) : (
                               <button
@@ -408,13 +472,14 @@ const ProductionFloor = ({
                 {chipBoxes.length > 0 && (
                   <div className="px-5 py-3 bg-blue-50 border-t border-blue-100 flex items-center justify-between">
                     <span className="text-xs font-semibold text-blue-700">
-                      Chip totals — {chipBoxes.length} box{chipBoxes.length !== 1 ? 'es' : ''}
+                      Chip summary — this shift
                     </span>
                     <div className="flex items-center gap-6 text-xs font-semibold">
-                      <span className="text-gray-600">Total: <span className="text-gray-900">{totalChipQty.toLocaleString()}</span></span>
-                      <span className="text-orange-600">Consumed: {totalConsumedChip.toLocaleString()}</span>
+                      <span className="text-orange-600">
+                        Used this shift: {autoChipsUsed.toLocaleString()}
+                      </span>
                       <span className={totalRemainingChip > 0 ? 'text-emerald-700' : 'text-gray-400'}>
-                        Remaining: {totalRemainingChip.toLocaleString()}
+                        Global remaining: {totalRemainingChip.toLocaleString()}
                       </span>
                     </div>
                   </div>
@@ -464,15 +529,26 @@ const ProductionFloor = ({
             </div>
 
             <div className="p-5 space-y-4">
+
+              {/* ── Chips used — always auto, shown as read-only banner ── */}
+              <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide mb-0.5">
+                    Chips Used This Shift
+                    <span className="ml-2 text-xs font-normal text-blue-500 normal-case">(auto from box updates)</span>
+                  </p>
+                  <p className="text-2xl font-bold text-blue-900">{autoChipsUsed.toLocaleString()}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs text-blue-500">{chipBoxes.length} chip box{chipBoxes.length !== 1 ? 'es' : ''}</p>
+                  <p className="text-xs text-blue-400 mt-0.5">Total logged for this shift</p>
+                </div>
+              </div>
+
               {!isEditingSummary ? (
                 /* ── View mode ── */
                 <>
-                  <div className="grid grid-cols-3 gap-3">
-                    <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3">
-                      <p className="text-xs font-medium text-blue-600 mb-1">Chips Used This Shift</p>
-                      <p className="text-2xl font-bold text-blue-900">{(displayChipsUsed || 0).toLocaleString()}</p>
-                      <p className="text-xs text-blue-400 mt-0.5">Total chips consumed in production</p>
-                    </div>
+                  <div className="grid grid-cols-2 gap-3">
                     <div className="bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3">
                       <p className="text-xs font-medium text-emerald-600 mb-1">QC Approved Goods</p>
                       <p className="text-2xl font-bold text-emerald-900">{(shiftSummary.qc_good || 0).toLocaleString()}</p>
@@ -483,24 +559,6 @@ const ProductionFloor = ({
                     </div>
                   </div>
 
-                  {/* Chip validation badge — only when summary saved */}
-                  {nativeChipBoxes.length > 0 && displayChipsUsed > 0 && (
-                    <div className={`flex items-center gap-2.5 px-4 py-2.5 rounded-lg text-xs font-medium ${
-                      chipValidOk
-                        ? 'bg-emerald-50 border border-emerald-200 text-emerald-800'
-                        : 'bg-red-50 border border-red-200 text-red-800'
-                    }`}>
-                      {chipValidOk
-                        ? <CheckCircle className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-                        : <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0" />}
-                      <span>
-                        {chipValidOk
-                          ? `Chips balanced — ${totalConsumedChip.toLocaleString()} chips accounted for`
-                          : `Box-level consumed (${totalConsumedChip.toLocaleString()}) ≠ Chips Used (${displayChipsUsed.toLocaleString()}) — review box updates`}
-                      </span>
-                    </div>
-                  )}
-
                   {shiftSummary.remarks && (
                     <div className="px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl">
                       <p className="text-xs font-medium text-gray-500 mb-1">Remarks</p>
@@ -508,8 +566,10 @@ const ProductionFloor = ({
                     </div>
                   )}
 
-                  {displayChipsUsed === 0 && (shiftSummary.qc_good || 0) === 0 && (shiftSummary.wastage || 0) === 0 && (
-                    <p className="text-xs text-gray-400 text-center py-2">No summary saved yet — click Edit to record production figures.</p>
+                  {(shiftSummary.qc_good || 0) === 0 && (shiftSummary.wastage || 0) === 0 && (
+                    <p className="text-xs text-gray-400 text-center py-2">
+                      No summary saved yet — click Edit to record QC and wastage counts.
+                    </p>
                   )}
                 </>
               ) : (
@@ -520,35 +580,10 @@ const ProductionFloor = ({
                       <AlertTriangle className="w-4 h-4 text-orange-500 flex-shrink-0 mt-0.5" />
                       <p className="text-xs text-orange-800">
                         <span className="font-semibold">{pendingCount} box{pendingCount !== 1 ? 'es' : ''} still pending update.</span>{' '}
-                        Update all boxes first for accurate chip cross-validation.
+                        Update all boxes first so chips used is fully accurate.
                       </p>
                     </div>
                   )}
-
-                  {/* Chips Used — full-width */}
-                  <div>
-                    <label className="flex items-center gap-1.5 text-xs font-medium text-gray-600 mb-1.5">
-                      <Hash className="w-3.5 h-3.5 text-blue-500" />
-                      Chips Used This Shift <span className="text-red-400">*</span>
-                      {nativeChipBoxes.length > 0 && (
-                        <span className="ml-auto text-xs text-blue-500 font-normal">
-                          Auto from boxes: {totalConsumedChip.toLocaleString()}
-                        </span>
-                      )}
-                    </label>
-                    <input
-                      type="number" min="0"
-                      value={editChipsUsedVal}
-                      onChange={e => handleSummaryChange('chips_used', e.target.value)}
-                      placeholder="0"
-                      className={`w-full px-3 py-2 border rounded-lg text-sm bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:border-transparent focus:bg-white ${
-                        summaryErrors.chip_mismatch ? 'border-red-300' : 'border-gray-200'}`}
-                    />
-                    <p className="mt-1 text-xs text-gray-400">Total chips consumed in this shift's production (must match box-level consumed)</p>
-                    {summaryErrors.chip_mismatch && (
-                      <p className="mt-1.5 text-xs text-red-600 font-medium">{summaryErrors.chip_mismatch}</p>
-                    )}
-                  </div>
 
                   <div className="grid grid-cols-2 gap-3">
                     {/* QC Approved Goods */}
@@ -588,36 +623,13 @@ const ProductionFloor = ({
                     </div>
                   </div>
 
-                  {/* Chip cross-check — compact inline panel */}
-                  {nativeChipBoxes.length > 0 && (
-                    <div className={`px-4 py-3 rounded-xl border text-xs ${
-                      (parseInt(shiftSummary.chips_used) || 0) === 0
-                        ? 'bg-gray-50 border-gray-200'
-                        : totalConsumedChip === (parseInt(shiftSummary.chips_used) || 0)
-                        ? 'bg-emerald-50 border-emerald-200'
-                        : 'bg-red-50 border-red-200'
-                    }`}>
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold text-gray-700">Chip Cross-Check</span>
-                        {(parseInt(shiftSummary.chips_used) || 0) === 0 ? (
-                          <span className="text-gray-400">Enter chips used above</span>
-                        ) : totalConsumedChip === (parseInt(shiftSummary.chips_used) || 0) ? (
-                          <span className="flex items-center gap-1 text-emerald-700 font-semibold">
-                            <CheckCircle className="w-3.5 h-3.5" /> Balanced
-                          </span>
-                        ) : (
-                          <span className="flex items-center gap-1 text-red-600 font-semibold">
-                            <AlertTriangle className="w-3.5 h-3.5" /> Off by {Math.abs(chipDiff).toLocaleString()}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-3 mt-1.5 text-gray-500">
-                        <span>Boxes: <strong className="text-gray-800">{totalConsumedChip.toLocaleString()}</strong></span>
-                        <span>|</span>
-                        <span>Entry: <strong className="text-gray-800">{(parseInt(shiftSummary.chips_used) || 0).toLocaleString()}</strong></span>
-                      </div>
-                    </div>
-                  )}
+                  {/* Info note about QC vs chips */}
+                  <div className="flex items-start gap-2.5 px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl">
+                    <Info className="w-4 h-4 text-gray-400 flex-shrink-0 mt-0.5" />
+                    <p className="text-xs text-gray-500">
+                      QC Approved and Wastage counts don't have to match Chips Used — chips may be embedded but not yet QC checked at end of shift.
+                    </p>
+                  </div>
 
                   {/* Remarks */}
                   <div>
@@ -680,7 +692,7 @@ const ProductionFloor = ({
             <div className="grid grid-cols-2 gap-2 pt-4 mt-4 border-t border-gray-100">
               <div className="bg-gray-50 rounded-lg px-3 py-2.5 text-center">
                 <p className="text-lg font-bold text-gray-900">{nativeBoxes.length}</p>
-                <p className="text-xs text-gray-400 mt-0.5">Boxes issued</p>
+                <p className="text-xs text-gray-400 mt-0.5">Issued boxes</p>
               </div>
               <div className="bg-gray-50 rounded-lg px-3 py-2.5 text-center">
                 <p className="text-lg font-bold text-gray-900">{assignedEmployees.length}</p>
@@ -697,8 +709,8 @@ const ProductionFloor = ({
               }`}>
                 <div className={`w-2 h-2 rounded-full flex-shrink-0 ${allBoxesUpdated ? 'bg-emerald-500' : 'bg-orange-400'}`} />
                 {allBoxesUpdated
-                  ? 'All boxes updated'
-                  : `${pendingCount} box${pendingCount !== 1 ? 'es' : ''} need update`}
+                  ? 'All boxes updated for this shift'
+                  : `${pendingCount} box${pendingCount !== 1 ? 'es' : ''} need shift update`}
               </div>
             )}
 
@@ -714,6 +726,45 @@ const ProductionFloor = ({
                 : 'No employees assigned'}
             </div>
           </div>
+
+          {/* Shift consumption log summary for context */}
+          {shiftBoxes.length > 0 && (
+            <div className="bg-white rounded-xl border border-gray-200 p-5">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">This Shift Log</p>
+              <div className="space-y-2">
+                {shiftBoxes.map(box => {
+                  const shiftConsumed = getShiftConsumed(box);
+                  const chip = isChipBox(box);
+                  const shiftStatus = getBoxShiftStatus(box);
+                  return (
+                    <div key={box.id} className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                          shiftStatus === 'Consumed This Shift' ? 'bg-gray-400'
+                            : shiftStatus === 'Partially Consumed' ? 'bg-amber-400'
+                            : shiftStatus.includes('Carry') ? 'bg-amber-300'
+                            : 'bg-orange-400'
+                        }`} />
+                        <span className="font-mono text-gray-700 truncate">{box.box_name}</span>
+                      </div>
+                      <span className={`font-semibold flex-shrink-0 ml-2 ${
+                        chip && shiftConsumed > 0 ? 'text-orange-700'
+                          : shiftStatus === 'Consumed This Shift' ? 'text-gray-500'
+                          : shiftStatus === 'Partially Consumed' ? 'text-amber-600'
+                          : 'text-gray-300'
+                      }`}>
+                        {chip
+                          ? (shiftConsumed > 0 ? `−${shiftConsumed.toLocaleString()}` : 'pending')
+                          : shiftStatus === 'Consumed This Shift' ? 'full'
+                          : shiftStatus === 'Partially Consumed' ? 'partial'
+                          : 'pending'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Team by segment */}
           {assignedEmployees.length > 0 && (
@@ -767,36 +818,65 @@ const ProductionFloor = ({
 
       {/* Update Box Modal */}
       {editingBox && (
-        <UpdateBoxModal box={editingBox} onSave={handleUpdateBox} onClose={() => setEditingBox(null)} />
+        <UpdateBoxModal
+          box={editingBox}
+          selectedDate={selectedDate}
+          selectedShift={selectedShift}
+          onSave={handleUpdateBox}
+          onClose={() => setEditingBox(null)}
+        />
       )}
     </div>
   );
 };
 
 // ─── Update Box Modal ─────────────────────────────────────────────────────────
-const UpdateBoxModal = ({ box, onSave, onClose }) => {
+const UpdateBoxModal = ({ box, selectedDate, selectedShift, onSave, onClose }) => {
   const chip = isChipBox(box);
+
+  // For chip: remaining = global remaining at this moment
   const totalQty        = box.quantity || 0;
   const alreadyConsumed = box.consumed_quantity || 0;
-  // Derive remaining from stored field; if not set, compute from total minus consumed
   const remaining = box.remaining_quantity != null
     ? Math.max(0, box.remaining_quantity)
     : Math.max(0, totalQty - alreadyConsumed);
 
-  const [consumedInput,   setConsumedInput]   = useState('');
-  const [consumptionType, setConsumptionType] = useState('');
-  const [remarks,         setRemarks]         = useState(box.remarks || '');
-  const [error,           setError]           = useState('');
+  // What was already consumed in THIS specific shift (in case of re-update)
+  const existingShiftEntry = (box.shiftConsumptionLog || []).find(
+    l => l.date === selectedDate && l.shift === selectedShift
+  );
+  const alreadyThisShift = existingShiftEntry ? (existingShiftEntry.consumed || 0) : 0;
+
+  // Available = current remaining + what was already logged this shift (re-update scenario)
+  const availableToConsume = remaining + alreadyThisShift;
+
+  const [consumedInput,   setConsumedInput]   = useState(alreadyThisShift > 0 ? String(alreadyThisShift) : '');
+  const [consumptionType, setConsumptionType] = useState(
+    existingShiftEntry?.consumption_type || ''
+  );
+  const [remarks, setRemarks] = useState(box.remarks || '');
+  const [error,   setError]   = useState('');
 
   const delta        = chip ? (parseInt(consumedInput) || 0) : 0;
-  const newRemaining = Math.max(0, remaining - delta);
+  // New remaining = available minus what we're now logging
+  const newRemaining = Math.max(0, availableToConsume - delta);
 
   const handleSave = () => {
     setError('');
     if (chip) {
       if (!consumedInput || delta <= 0) { setError('Enter consumed quantity'); return; }
-      if (delta > remaining)            { setError(`Cannot exceed remaining (${remaining.toLocaleString()})`); return; }
-      onSave(box.id, { consumed_this_update: delta, remarks });
+      if (delta > availableToConsume) {
+        setError(`Cannot exceed available quantity (${availableToConsume.toLocaleString()})`);
+        return;
+      }
+      onSave(box.id, {
+        consumed_this_shift: delta,
+        // Adjust totals: undo previous log entry for this shift, apply new delta
+        // Net change = delta - alreadyThisShift
+        consumed_this_update: delta - alreadyThisShift,
+        remaining_after: newRemaining,
+        remarks,
+      });
     } else {
       if (!consumptionType) { setError('Please select Fully or Partially Consumed'); return; }
       onSave(box.id, { consumption_type: consumptionType, remarks });
@@ -820,10 +900,15 @@ const UpdateBoxModal = ({ box, onSave, onClose }) => {
             <h3 className="text-base font-bold text-gray-900">{box.box_name}</h3>
             <div className="flex items-center gap-2 mt-1">
               <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${typeBadge}`}>{typeName}</span>
-              {chip && (
-                <span className="text-xs text-gray-400">{remaining.toLocaleString()} chips available</span>
-              )}
+              <span className="text-xs text-gray-400">
+                {selectedDate} · {selectedShift} Shift
+              </span>
             </div>
+            {alreadyThisShift > 0 && (
+              <p className="text-xs text-amber-600 mt-1">
+                Already logged {alreadyThisShift.toLocaleString()} for this shift — updating will replace
+              </p>
+            )}
           </div>
           <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors">
             <X className="w-4 h-4 text-gray-500" />
@@ -832,7 +917,6 @@ const UpdateBoxModal = ({ box, onSave, onClose }) => {
 
         <div className="px-6 py-5 space-y-4">
           {chip ? (
-            /* ── Chip box ─────────────────────────────────────────────────── */
             <>
               {/* Compact 3-col summary */}
               <div className="grid grid-cols-3 gap-2 text-center">
@@ -841,25 +925,25 @@ const UpdateBoxModal = ({ box, onSave, onClose }) => {
                   <p className="text-base font-bold text-gray-900">{totalQty.toLocaleString()}</p>
                 </div>
                 <div className="bg-orange-50 rounded-xl px-3 py-2.5">
-                  <p className="text-xs text-orange-600 mb-0.5">Used so far</p>
+                  <p className="text-xs text-orange-600 mb-0.5">Global used</p>
                   <p className="text-base font-bold text-orange-800">{alreadyConsumed.toLocaleString()}</p>
                 </div>
                 <div className="bg-emerald-50 rounded-xl px-3 py-2.5">
-                  <p className="text-xs text-emerald-600 mb-0.5">Remaining</p>
-                  <p className="text-base font-bold text-emerald-800">{remaining.toLocaleString()}</p>
+                  <p className="text-xs text-emerald-600 mb-0.5">Available</p>
+                  <p className="text-base font-bold text-emerald-800">{availableToConsume.toLocaleString()}</p>
                 </div>
               </div>
 
-              {/* Input — label includes max inline, no redundant text below */}
+              {/* Input */}
               <div>
                 <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-2">
                   <span className="flex items-center gap-1.5">
-                    <Hash className="w-4 h-4" /> Consumed this update
+                    <Hash className="w-4 h-4" /> Consumed this shift
                   </span>
-                  <span className="text-xs text-gray-400 font-normal">Max {remaining.toLocaleString()}</span>
+                  <span className="text-xs text-gray-400 font-normal">Max {availableToConsume.toLocaleString()}</span>
                 </label>
                 <input
-                  type="number" min="0" max={remaining}
+                  type="number" min="0" max={availableToConsume}
                   value={consumedInput}
                   onChange={e => { setConsumedInput(e.target.value); setError(''); }}
                   placeholder="Enter quantity"
@@ -868,17 +952,19 @@ const UpdateBoxModal = ({ box, onSave, onClose }) => {
                 />
               </div>
 
-              {/* Running total — only shows when input is valid */}
-              {delta > 0 && delta <= remaining && (
+              {/* Running total */}
+              {delta > 0 && delta <= availableToConsume && (
                 <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
                   <div className="grid grid-cols-3 gap-2 text-center text-xs">
                     <div>
-                      <p className="text-blue-600 mb-0.5">Used so far</p>
-                      <p className="font-bold text-blue-900">{alreadyConsumed.toLocaleString()}</p>
+                      <p className="text-blue-600 mb-0.5">This shift</p>
+                      <p className="font-bold text-blue-900">{delta.toLocaleString()}</p>
                     </div>
                     <div>
-                      <p className="text-orange-600 mb-0.5">+ This update</p>
-                      <p className="font-bold text-orange-800">+{delta.toLocaleString()}</p>
+                      <p className="text-orange-600 mb-0.5">Total used</p>
+                      <p className="font-bold text-orange-800">
+                        {(alreadyConsumed - alreadyThisShift + delta).toLocaleString()}
+                      </p>
                     </div>
                     <div>
                       <p className="text-emerald-600 mb-0.5">New remaining</p>
@@ -888,11 +974,11 @@ const UpdateBoxModal = ({ box, onSave, onClose }) => {
                 </div>
               )}
 
-              {delta > 0 && newRemaining > 0 && delta <= remaining && (
+              {delta > 0 && newRemaining > 0 && delta <= availableToConsume && (
                 <div className="flex items-start gap-2 px-3 py-2.5 bg-amber-50 border border-amber-200 rounded-xl">
                   <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
                   <p className="text-xs text-amber-800">
-                    <span className="font-semibold">{newRemaining.toLocaleString()} chips will remain</span> — box will carry over to next shift.
+                    <span className="font-semibold">{newRemaining.toLocaleString()} chips will remain</span> — this box will continue to the next shift.
                   </p>
                 </div>
               )}
@@ -904,6 +990,13 @@ const UpdateBoxModal = ({ box, onSave, onClose }) => {
                 <span className="text-sm text-gray-600">Box quantity</span>
                 <span className="text-lg font-bold text-gray-900">{totalQty.toLocaleString()} units</span>
               </div>
+
+              {existingShiftEntry && (
+                <div className="flex items-center gap-2 px-3 py-2.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800">
+                  <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                  Previously marked as <span className="font-semibold">{existingShiftEntry.consumption_type === 'fully' ? 'Fully Consumed' : 'Partially Consumed'}</span> this shift. Updating will replace.
+                </div>
+              )}
 
               <div className="space-y-2">
                 <p className="text-sm font-medium text-gray-700">
@@ -922,7 +1015,7 @@ const UpdateBoxModal = ({ box, onSave, onClose }) => {
                   />
                   <div>
                     <p className="font-semibold text-sm text-gray-900">Fully Consumed</p>
-                    <p className="text-xs text-gray-500 mt-0.5">All material used — status changes to Consumed</p>
+                    <p className="text-xs text-gray-500 mt-0.5">All material used — box lifecycle ends here</p>
                   </div>
                 </label>
 

@@ -28,50 +28,76 @@ const Production = ({
     shiftSummaries.forEach(summary => {
       const key = `${summary.date}_${summary.shift}`;
       grouped[key] = {
-        date:             summary.date,
-        shift:            summary.shift,
-        chips_used:       summary.chips_used ?? summary.finished_product ?? 0,
-        finished_product: summary.chips_used ?? summary.finished_product ?? 0,
-        qc_good:          summary.qc_good   || 0,
-        wastage:          summary.wastage   || 0,
-        employee_count:   0,
-        summary_saved:    true,
-        remarks:          summary.remarks   || '',
+        date:          summary.date,
+        shift:         summary.shift,
+        chips_used:    summary.chips_used || 0,
+        qc_good:       summary.qc_good    || 0,
+        wastage:       summary.wastage    || 0,
+        employee_count: 0,
+        summary_saved: true,
+        remarks:       summary.remarks    || '',
       };
     });
 
-    // From productionShifts (backward compat — only if not already from shiftSummaries)
+    // Fill in chips_used from box shiftConsumptionLog for any date+shift
+    // (works even before a summary is saved, giving live data)
+    boxes.forEach(box => {
+      const isChip =
+        (box.item_type || '').toLowerCase() === 'chip' ||
+        (box.item_name || '').toLowerCase() === 'chip';
+      if (!isChip) return;
+
+      (box.shiftConsumptionLog || []).forEach(entry => {
+        const key = `${entry.date}_${entry.shift}`;
+        if (!grouped[key]) {
+          grouped[key] = {
+            date:          entry.date,
+            shift:         entry.shift,
+            chips_used:    0,
+            qc_good:       0,
+            wastage:       0,
+            employee_count: 0,
+            summary_saved: false,
+            remarks:       '',
+          };
+        }
+        // Only add chip consumption from log if summary hasn't overridden it
+        if (!grouped[key].summary_saved) {
+          grouped[key].chips_used = (grouped[key].chips_used || 0) + (entry.consumed || 0);
+        }
+      });
+    });
+
+    // From productionShifts (backward compat — only if not already present)
     productionShifts.forEach(shift => {
       const key = `${shift.date}_${shift.shift}`;
       if (!grouped[key]) {
         grouped[key] = {
-          date:             shift.date,
-          shift:            shift.shift,
-          chips_used:       shift.finished_product_count || 0,
-          finished_product: shift.finished_product_count || 0,
-          qc_good:          shift.qc_approved_count      || 0,
-          wastage:          shift.wastage_count          || 0,
-          employee_count:   0,
-          summary_saved:    false,
-          remarks:          '',
+          date:          shift.date,
+          shift:         shift.shift,
+          chips_used:    shift.finished_product_count || 0,
+          qc_good:       shift.qc_approved_count      || 0,
+          wastage:       shift.wastage_count          || 0,
+          employee_count: 0,
+          summary_saved: false,
+          remarks:       '',
         };
       }
     });
 
-    // From subBoxes — also ensures shifts with sub-boxes appear even if no summary
+    // From subBoxes — ensures shifts with sub-boxes appear even if no summary
     subBoxes.forEach(subBox => {
       const key = `${subBox.production_date}_${subBox.shift}`;
       if (!grouped[key]) {
         grouped[key] = {
-          date:             subBox.production_date,
-          shift:            subBox.shift,
-          chips_used:       0,
-          finished_product: 0,
-          qc_good:          0,
-          wastage:          0,
-          employee_count:   0,
-          summary_saved:    false,
-          remarks:          '',
+          date:          subBox.production_date,
+          shift:         subBox.shift,
+          chips_used:    0,
+          qc_good:       0,
+          wastage:       0,
+          employee_count: 0,
+          summary_saved: false,
+          remarks:       '',
         };
       }
     });
@@ -82,14 +108,14 @@ const Production = ({
       if (grouped[key]) grouped[key].employee_count += 1;
     });
 
-    // Pending-box count: native boxes for this date+shift that need update
+    // Pending-box count: boxes issued to this date+shift that haven't been logged yet
     Object.keys(grouped).forEach(key => {
       const [date, shift] = key.split('_');
       const pendingCount = boxes.filter(b =>
         b.issue_date  === date &&
         b.issue_shift === shift &&
-        !b.shift_updated &&
-        b.status !== 'Consumed'
+        b.status      !== 'Consumed' &&
+        !(b.shiftConsumptionLog || []).some(l => l.date === date && l.shift === shift)
       ).length;
       grouped[key].pending_boxes = pendingCount;
     });
@@ -121,8 +147,9 @@ const Production = ({
   const totalChipsUsed = filteredData.reduce((s, i) => s + (i.chips_used || 0), 0);
   const totalQCGood    = filteredData.reduce((s, i) => s + i.qc_good, 0);
   const totalWastage   = filteredData.reduce((s, i) => s + i.wastage, 0);
-  const wastageRate    = totalChipsUsed > 0
-    ? ((totalWastage / totalChipsUsed) * 100).toFixed(1) : 0;
+  const wastageRate    = totalQCGood + totalWastage > 0
+    ? ((totalWastage / (totalQCGood + totalWastage)) * 100).toFixed(1)
+    : 0;
 
   const handleGoToFloor = (date, shift) => {
     onNavigate('production-floor', null, null, null, null, null, { date, shift });
@@ -146,6 +173,7 @@ const Production = ({
             <div>
               <p className="text-sm font-medium text-gray-600">Chips Used</p>
               <p className="text-2xl font-bold text-gray-900 mt-1">{totalChipsUsed.toLocaleString()}</p>
+              <p className="text-xs text-gray-400 mt-0.5">Auto from box logs</p>
             </div>
             <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
               <Hash className="w-6 h-6 text-blue-600" />
@@ -181,6 +209,7 @@ const Production = ({
               <p className={`text-2xl font-bold mt-1 ${parseFloat(wastageRate) > 5 ? 'text-red-700' : 'text-emerald-700'}`}>
                 {wastageRate}%
               </p>
+              <p className="text-xs text-gray-400 mt-0.5">Of QC + Wastage total</p>
             </div>
             <div className={`w-12 h-12 rounded-lg flex items-center justify-center ${
               parseFloat(wastageRate) > 5 ? 'bg-red-100' : 'bg-emerald-100'
@@ -231,19 +260,18 @@ const Production = ({
                 <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Date</th>
                 <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Shift</th>
                 <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center">Employees</th>
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider text-right">
+                  Chips Used
+                  <span className="block text-gray-400 normal-case font-normal text-xs">auto from log</span>
+                </th>
                 <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider text-right">QC Approved</th>
                 <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider text-right">Wastage</th>
-                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider text-right">Chips Used</th>
                 <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center">Status & Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
               {paginatedData.length > 0 ? (
                 paginatedData.map((item, idx) => {
-                  const qcRate = item.chips_used > 0
-                    ? ((item.qc_good / item.chips_used) * 100).toFixed(1) : 0;
-                  const wastagePercent = item.chips_used > 0
-                    ? ((item.wastage / item.chips_used) * 100).toFixed(1) : 0;
                   const hasPending    = (item.pending_boxes || 0) > 0;
                   const summaryMissing = !item.summary_saved;
 
@@ -279,13 +307,24 @@ const Production = ({
                         </div>
                       </td>
 
+                      {/* Chips Used — auto */}
+                      <td className="px-6 py-4 text-right">
+                        {item.chips_used > 0 ? (
+                          <div>
+                            <span className="font-semibold text-blue-700">{item.chips_used.toLocaleString()}</span>
+                            {!item.summary_saved && (
+                              <p className="text-xs text-gray-400 mt-0.5">live</p>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-gray-300 italic">—</span>
+                        )}
+                      </td>
+
                       {/* QC Approved */}
                       <td className="px-6 py-4 text-right">
                         {item.summary_saved ? (
-                          <div>
-                            <span className="font-semibold text-emerald-700">{item.qc_good.toLocaleString()}</span>
-                            <p className="text-xs text-gray-400 mt-0.5">{qcRate}% pass rate</p>
-                          </div>
+                          <span className="font-semibold text-emerald-700">{item.qc_good.toLocaleString()}</span>
                         ) : (
                           <span className="text-xs text-gray-300 italic">—</span>
                         )}
@@ -294,23 +333,7 @@ const Production = ({
                       {/* Wastage */}
                       <td className="px-6 py-4 text-right">
                         {item.summary_saved ? (
-                          <div>
-                            <span className={`font-semibold ${parseFloat(wastagePercent) > 5 ? 'text-red-700' : 'text-gray-700'}`}>
-                              {item.wastage.toLocaleString()}
-                            </span>
-                            <p className={`text-xs mt-0.5 ${parseFloat(wastagePercent) > 5 ? 'text-red-400' : 'text-gray-400'}`}>
-                              {wastagePercent}%
-                            </p>
-                          </div>
-                        ) : (
-                          <span className="text-xs text-gray-300 italic">—</span>
-                        )}
-                      </td>
-
-                      {/* Chips Used */}
-                      <td className="px-6 py-4 text-right">
-                        {item.summary_saved ? (
-                          <span className="font-semibold text-blue-700">{(item.chips_used || 0).toLocaleString()}</span>
+                          <span className="font-semibold text-red-700">{item.wastage.toLocaleString()}</span>
                         ) : (
                           <span className="text-xs text-gray-300 italic">—</span>
                         )}
@@ -319,14 +342,13 @@ const Production = ({
                       {/* Status + Actions */}
                       <td className="px-6 py-4">
                         <div className="flex flex-col items-center gap-1.5">
-                          {/* Status indicator */}
                           {hasPending ? (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-orange-100 text-orange-700">
                               <AlertTriangle className="w-3 h-3" /> {item.pending_boxes} boxes pending
                             </span>
                           ) : summaryMissing ? (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-amber-100 text-amber-700">
-                              <AlertCircle className="w-3 h-3" /> Summary needed
+                              <AlertCircle className="w-3 h-3" /> QC summary needed
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-emerald-100 text-emerald-700">
@@ -334,7 +356,6 @@ const Production = ({
                             </span>
                           )}
 
-                          {/* Actions */}
                           <div className="flex items-center gap-1 mt-0.5">
                             <button
                               onClick={() => handleGoToFloor(item.date, item.shift)}

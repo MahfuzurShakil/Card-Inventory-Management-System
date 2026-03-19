@@ -662,24 +662,63 @@ const handleCreateChallan = (selectedIds = []) => {
   };
 
   // Handle Box Consumption Update from Production Floor
-  const handleUpdateBoxConsumption = (boxId, updateData) => {
-    setBoxes(prev => prev.map(box => {
-      if (box.id === boxId) {
-        const currentRemaining = box.remaining_quantity || box.quantity || 0;
-        const currentConsumed = box.consumed_quantity || 0;
-        const newConsumed = updateData.consumed_quantity || 0;
+  // const handleUpdateBoxConsumption = (boxId, updateData) => {
+  //   setBoxes(prev => prev.map(box => {
+  //     if (box.id === boxId) {
+  //       const currentRemaining = box.remaining_quantity || box.quantity || 0;
+  //       const currentConsumed = box.consumed_quantity || 0;
+  //       const newConsumed = updateData.consumed_quantity || 0;
         
-        return { 
-          ...box, 
-          ...updateData,
-          consumed_quantity: currentConsumed + newConsumed,
-          remaining_quantity: currentRemaining - newConsumed,
-          updated_at: new Date().toISOString()
-        };
-      }
-      return box;
-    }));
-  };
+  //       return { 
+  //         ...box, 
+  //         ...updateData,
+  //         consumed_quantity: currentConsumed + newConsumed,
+  //         remaining_quantity: currentRemaining - newConsumed,
+  //         updated_at: new Date().toISOString()
+  //       };
+  //     }
+  //     return box;
+  //   }));
+  // };
+
+  const handleUpdateBoxConsumption = (boxId, updateData) => {
+  setBoxes(prev => prev.map(box => {
+    if (box.id !== boxId) return box;
+ 
+    const chip = (box.item_type || '').toLowerCase() === 'chip' ||
+                 (box.item_name || '').toLowerCase() === 'chip';
+ 
+    if (chip) {
+      // net_delta = how much MORE was consumed compared to what was previously logged
+      const netDelta       = parseInt(updateData.consumed_this_update || 0);
+      const prevConsumed   = box.consumed_quantity   || 0;
+      const prevRemaining  = box.remaining_quantity != null
+        ? box.remaining_quantity
+        : Math.max(0, (box.quantity || 0) - prevConsumed);
+ 
+      const newConsumed   = prevConsumed  + netDelta;
+      const newRemaining  = Math.max(0, prevRemaining - netDelta);
+ 
+      return {
+        ...box,
+        // Spread everything from updateData (shiftConsumptionLog, status, carry_over, remarks, etc.)
+        ...updateData,
+        // But override the quantity fields with correctly computed values
+        consumed_quantity:  newConsumed,
+        remaining_quantity: newRemaining,
+        status: newRemaining <= 0 ? 'Consumed' : 'Material In Production',
+        updated_at: new Date().toISOString(),
+      };
+    } else {
+      // Tape / Sheet — just spread updateData, no quantity arithmetic needed
+      return {
+        ...box,
+        ...updateData,
+        updated_at: new Date().toISOString(),
+      };
+    }
+  }));
+};
 
   // Handle Shift Summary Update
   // const handleUpdateShiftSummary = (date, shift, summaryData) => {
