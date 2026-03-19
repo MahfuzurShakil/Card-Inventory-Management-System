@@ -524,6 +524,7 @@ const handleSaveAssignments = (assignments) => {
         item_type:           box.item_type,
         quantity:            box.quantity,
         missing_qty:         box.missing_qty,
+        prod_extra_qty:      box.prod_extra_qty || 0,
         remarks:             box.remarks,
         consumed_quantity:   0,
         remaining_quantity:  null,
