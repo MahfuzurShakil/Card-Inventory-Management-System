@@ -681,36 +681,36 @@ const handleCreateChallan = (selectedIds = []) => {
   //   }));
   // };
 
-  const handleUpdateBoxConsumption = (boxId, updateData) => {
+ const handleUpdateBoxConsumption = (boxId, updateData) => {
   setBoxes(prev => prev.map(box => {
     if (box.id !== boxId) return box;
  
-    const chip = (box.item_type || '').toLowerCase() === 'chip' ||
-                 (box.item_name || '').toLowerCase() === 'chip';
+    const chip =
+      (box.item_type || '').toLowerCase() === 'chip' ||
+      (box.item_name || '').toLowerCase() === 'chip';
  
     if (chip) {
-      // net_delta = how much MORE was consumed compared to what was previously logged
-      const netDelta       = parseInt(updateData.consumed_this_update || 0);
-      const prevConsumed   = box.consumed_quantity   || 0;
-      const prevRemaining  = box.remaining_quantity != null
-        ? box.remaining_quantity
-        : Math.max(0, (box.quantity || 0) - prevConsumed);
+      // Apply the signed delta to running totals
+      const delta        = parseInt(updateData.consumed_this_update || 0);
+      const prevConsumed = box.consumed_quantity || 0;
+      const prevRemaining =
+        box.remaining_quantity != null
+          ? box.remaining_quantity
+          : Math.max(0, (box.quantity || 0) - prevConsumed);
  
-      const newConsumed   = prevConsumed  + netDelta;
-      const newRemaining  = Math.max(0, prevRemaining - netDelta);
+      const newConsumed   = prevConsumed + delta;
+      const newRemaining  = Math.max(0, prevRemaining - delta);
  
       return {
         ...box,
-        // Spread everything from updateData (shiftConsumptionLog, status, carry_over, remarks, etc.)
-        ...updateData,
-        // But override the quantity fields with correctly computed values
-        consumed_quantity:  newConsumed,
+        ...updateData,                              // spreads shiftConsumptionLog, carry_over, remarks
+        consumed_quantity:  newConsumed,            // override with computed values
         remaining_quantity: newRemaining,
         status: newRemaining <= 0 ? 'Consumed' : 'Material In Production',
         updated_at: new Date().toISOString(),
       };
     } else {
-      // Tape / Sheet — just spread updateData, no quantity arithmetic needed
+      // Tape / Sheet — no quantity arithmetic, just apply whatever the floor sent
       return {
         ...box,
         ...updateData,
