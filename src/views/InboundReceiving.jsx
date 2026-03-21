@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Package, ChevronRight, ChevronDown, CheckCircle, CheckSquare, Square,
   Printer, AlertTriangle, SkipForward
@@ -134,12 +134,10 @@ ${labels}
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// BARCODE SUCCESS MODAL — shown AFTER boxes are already saved
-// Header: "X boxes received successfully. Barcodes generated."
-// Footer: "Do you want to print the barcodes now?" + Skip/Later + Print Now
-// Clicking Skip/Later closes modal and stays on receiving page.
+// BARCODE SUCCESS MODAL
+// isComplete = true when this batch completes ALL remaining boxes
 // ═══════════════════════════════════════════════════════════════════════════════
-const BarcodeSuccessModal = ({ boxes, shipmentNumber, onSkip }) => (
+const BarcodeSuccessModal = ({ boxes, shipmentNumber, isComplete, onSkip }) => (
   <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
     <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
 
@@ -154,16 +152,20 @@ const BarcodeSuccessModal = ({ boxes, shipmentNumber, onSkip }) => (
           </div>
           <p className="text-sm text-gray-500">
             Barcodes generated · Shipment <span className="font-semibold">{shipmentNumber}</span>
+            {isComplete && (
+              <span className="ml-2 px-2 py-0.5 text-xs font-semibold bg-emerald-100 text-emerald-700 rounded-full">
+                All boxes received ✓
+              </span>
+            )}
           </p>
         </div>
       </div>
 
-      {/* Label preview — vertical list matching ZD230 roll output */}
+      {/* Label preview */}
       <div className="overflow-y-auto flex-1 p-6 bg-gray-100 space-y-4">
         {boxes.map((box, i) => (
           <div
             key={i}
-            /* Use full width of column at ~480px preview width */
             className="bg-white border border-gray-300 rounded-md shadow-sm mx-auto"
             style={{
               width: '100%',
@@ -176,29 +178,19 @@ const BarcodeSuccessModal = ({ boxes, shipmentNumber, onSkip }) => (
               boxSizing: 'border-box',
             }}
           >
-            {/* Top row */}
             <div className="flex justify-between items-center">
               <span className="text-gray-400 font-bold uppercase tracking-widest" style={{ fontSize: 8 }}>
                 Material Box Label
               </span>
               <span className="text-gray-300" style={{ fontSize: 8 }}>{shipmentNumber}</span>
             </div>
-
-            {/* Box name */}
             <p className="text-center font-extrabold text-gray-900 tracking-wide" style={{ fontSize: 15 }}>
               {box.box_name}
             </p>
-
-            {/* Barcode */}
             <div className="flex justify-center">
               <BarcodeSVG value={box.barcode} width={340} height={52} fontSize={10} />
             </div>
-
-            {/* Meta row */}
-            <div
-              className="flex justify-between text-gray-600 border-t border-gray-100 pt-1"
-              style={{ fontSize: 9 }}
-            >
+            <div className="flex justify-between text-gray-600 border-t border-gray-100 pt-1" style={{ fontSize: 9 }}>
               <span><b>Item:</b> {box.item_name}</span>
               <span><b>Qty:</b> {(box.quantity || 0).toLocaleString()}</span>
             </div>
@@ -206,10 +198,12 @@ const BarcodeSuccessModal = ({ boxes, shipmentNumber, onSkip }) => (
         ))}
       </div>
 
-      {/* Footer — print prompt */}
-      <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-xl flex items-center justify-between flex-shrink-0">
+      {/* Footer */}
+      <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 flex items-center justify-between flex-shrink-0">
         <p className="text-sm font-medium text-gray-700">
-          Do you want to print the barcodes now?
+          {isComplete
+            ? 'All boxes received. Print labels then return to list.'
+            : 'Do you want to print the barcodes now?'}
         </p>
         <div className="flex items-center gap-3">
           <button
@@ -217,7 +211,7 @@ const BarcodeSuccessModal = ({ boxes, shipmentNumber, onSkip }) => (
             className="flex items-center gap-1.5 px-5 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-white font-medium transition-colors text-sm"
           >
             <SkipForward className="w-4 h-4" />
-            Skip / Later
+            {isComplete ? 'Back to List' : 'Skip / Later'}
           </button>
           <button
             onClick={() => { openPrintWindow(boxes, shipmentNumber); onSkip(); }}
@@ -242,10 +236,10 @@ const itemBadgeCls = (type = '') => {
 };
 
 // ── Main Component ────────────────────────────────────────────────────────────
-const InboundReceiving = ({ material, lc, onSave, onBack }) => {
+// onComplete: called after user dismisses modal when all boxes are received
+const InboundReceiving = ({ material, lc, onSave, onBack, onComplete }) => {
   const shipmentItems = material?.stepData?.warehouse?.items || [];
 
-  // Per-box state: missing_qty, prod_extra_qty, remarks
   const [boxStates, setBoxStates] = useState(() => {
     const state = {};
     shipmentItems.forEach((item, itemIdx) => {
@@ -264,15 +258,25 @@ const InboundReceiving = ({ material, lc, onSave, onBack }) => {
     return existing;
   });
 
+  // Sync receivedBoxKeys whenever the material prop updates (after each partial batch save)
+  useEffect(() => {
+    if (material?.received_box_keys) {
+      const synced = {};
+      Object.keys(material.received_box_keys).forEach(k => { synced[k] = true; });
+      setReceivedBoxKeys(synced);
+    }
+  }, [material?.received_box_keys]);
+
   const [selectedKeys,  setSelectedKeys]  = useState({});
   const [expandedItems, setExpandedItems] = useState(() => {
     const init = {};
     shipmentItems.forEach((_, idx) => { if (idx === 0) init[idx] = true; });
     return init;
   });
-  const [errors,            setErrors]            = useState({});
-  // barcodeModalBoxes is set AFTER boxes are already saved — modal is print-only
-  const [barcodeModalBoxes, setBarcodeModalBoxes] = useState(null);
+  const [errors, setErrors] = useState({});
+
+  // Modal data: { boxes, isComplete } or null
+  const [modalData, setModalData] = useState(null);
 
   const toggleItem = (idx) =>
     setExpandedItems(prev => ({ ...prev, [idx]: !prev[idx] }));
@@ -353,25 +357,22 @@ const InboundReceiving = ({ material, lc, onSave, onBack }) => {
     return result;
   };
 
-  // ── NEW CONFIRM FLOW ─────────────────────────────────────────────────────
-  // 1. Validate → 2. Save boxes to App state immediately → 3. Show print modal
   const handleConfirmBatch = (e) => {
     e.preventDefault();
     if (!validateSelected()) return;
     const batchBoxes = buildSelectedBoxData();
     if (batchBoxes.length === 0) return;
 
+    // Calculate new received keys including this batch
     const newReceivedKeys = { ...receivedBoxKeys };
     batchBoxes.forEach(b => { newReceivedKeys[b.key] = true; });
-    setReceivedBoxKeys(newReceivedKeys);
-    setSelectedKeys({});
 
     const totalBoxCount      = shipmentItems.reduce((s, i) => s + (i.boxes?.length || 0), 0);
     const totalReceivedCount = Object.keys(newReceivedKeys).filter(k => newReceivedKeys[k]).length;
     const isFullyReceived    = totalReceivedCount >= totalBoxCount;
 
     const itemVerifications = shipmentItems.map((item, itemIdx) => {
-      const boxes      = item.boxes || [];
+      const boxes       = item.boxes || [];
       const itemMissing = boxes.reduce((s, _, bi) =>
         s + ((boxStates[`${itemIdx}-${bi}`]?.missing_qty) || 0), 0);
       const expectedQty = parseInt(item.quantity) || 0;
@@ -388,7 +389,15 @@ const InboundReceiving = ({ material, lc, onSave, onBack }) => {
       };
     });
 
-    // Save immediately — boxes are created now
+    // ── KEY FIX: Show modal and update local state BEFORE calling onSave ──
+    // This ensures the modal renders before any parent re-render happens.
+    // Navigation (if fully received) is deferred until the user dismisses the modal.
+    setModalData({ boxes: batchBoxes, isComplete: isFullyReceived });
+    setSelectedKeys({});
+    setReceivedBoxKeys(newReceivedKeys);
+
+    // Always pass is_partial: true so App.jsx never auto-navigates.
+    // Navigation is fully controlled by handleModalClose below.
     onSave({
       material_id:        material.id,
       received_by:        'Warehouse Staff',
@@ -398,15 +407,21 @@ const InboundReceiving = ({ material, lc, onSave, onBack }) => {
       received_box_keys:  newReceivedKeys,
       batch_boxes:        batchBoxes,
       status:             isFullyReceived ? 'Received' : 'Partially Received',
-      is_partial:         !isFullyReceived,
+      is_partial:         true, // always true — we handle navigation here, not in App.jsx
     });
-
-    // Show print modal — stays on page whether partial or full
-    setBarcodeModalBoxes(batchBoxes);
   };
 
-  // Skip / Later: close modal, stay on receiving page
-  const handleModalClose = () => setBarcodeModalBoxes(null);
+  // Called when user clicks "Skip / Later", "Back to List", or "Print Barcodes Now"
+  const handleModalClose = () => {
+    const wasComplete = modalData?.isComplete;
+    setModalData(null);
+    if (wasComplete) {
+      // All boxes done — navigate away now that modal has been shown
+      if (onComplete) onComplete();
+      else onBack();
+    }
+    // If partial, just close modal and stay on page for next batch
+  };
 
   // ── Derived totals ────────────────────────────────────────────────────────
   const totalBoxCount      = shipmentItems.reduce((s, i) => s + (i.boxes?.length || parseInt(i.no_of_boxes) || 0), 0);
@@ -454,10 +469,11 @@ const InboundReceiving = ({ material, lc, onSave, onBack }) => {
 
   return (
     <div className="space-y-5">
-      {barcodeModalBoxes && (
+      {modalData && (
         <BarcodeSuccessModal
-          boxes={barcodeModalBoxes}
+          boxes={modalData.boxes}
           shipmentNumber={material.shipment_number}
+          isComplete={modalData.isComplete}
           onSkip={handleModalClose}
         />
       )}
@@ -578,7 +594,6 @@ const InboundReceiving = ({ material, lc, onSave, onBack }) => {
                           <table className="w-full text-sm">
                             <thead className="sticky top-0 z-10">
                               <tr className="border-b border-gray-100 bg-gray-50">
-                                {/* Select-all for this item */}
                                 <th className="px-2 py-2.5 text-center w-8" onClick={e => e.stopPropagation()}>
                                   {unreceivedKeys.length > 0 && (
                                     <button
@@ -640,13 +655,9 @@ const InboundReceiving = ({ material, lc, onSave, onBack }) => {
                                             : 'hover:bg-gray-50/40'
                                     }`}
                                   >
-                                    {/* Checkbox / received tick */}
                                     <td className="px-2 py-2.5 text-center">
                                       {isReceived ? (
-                                        <CheckCircle
-                                          className="w-4 h-4 text-emerald-500 mx-auto"
-                                          title="Received & barcode generated"
-                                        />
+                                        <CheckCircle className="w-4 h-4 text-emerald-500 mx-auto" title="Received" />
                                       ) : (
                                         <button
                                           type="button"
@@ -655,15 +666,11 @@ const InboundReceiving = ({ material, lc, onSave, onBack }) => {
                                             isSelected ? 'text-blue-600' : 'text-gray-300 hover:text-blue-400'
                                           }`}
                                         >
-                                          {isSelected
-                                            ? <CheckSquare className="w-4 h-4" />
-                                            : <Square className="w-4 h-4" />
-                                          }
+                                          {isSelected ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
                                         </button>
                                       )}
                                     </td>
 
-                                    {/* Box Name — wraps to 2 lines; Received badge on second line */}
                                     <td className="px-3 py-2.5 font-mono text-xs text-gray-700">
                                       <div>{box.box_name}</div>
                                       {isReceived && (
@@ -673,14 +680,12 @@ const InboundReceiving = ({ material, lc, onSave, onBack }) => {
                                       )}
                                     </td>
 
-                                    {/* Box Qty locked */}
                                     <td className="px-3 py-2.5 text-center">
                                       <span className="inline-block px-2 py-1 bg-gray-100 text-gray-600 rounded text-xs font-semibold cursor-not-allowed select-none">
                                         {(box.quantity || 0).toLocaleString()}
                                       </span>
                                     </td>
 
-                                    {/* Proc Missing / Extra locked */}
                                     <td className="px-3 py-2.5 text-center">
                                       {(procMissing > 0 || procExtra > 0) ? (
                                         <div className="flex flex-col items-center gap-0.5">
@@ -700,7 +705,6 @@ const InboundReceiving = ({ material, lc, onSave, onBack }) => {
                                       )}
                                     </td>
 
-                                    {/* Production Missing — editable */}
                                     <td className="px-3 py-2.5 text-center">
                                       {isReceived ? (
                                         <span className="inline-block px-2 py-1 bg-gray-100 text-gray-500 rounded text-xs select-none">
@@ -724,7 +728,6 @@ const InboundReceiving = ({ material, lc, onSave, onBack }) => {
                                       )}
                                     </td>
 
-                                    {/* Production Extra — NEW editable column */}
                                     <td className="px-3 py-2.5 text-center">
                                       {isReceived ? (
                                         <span className="inline-block px-2 py-1 bg-gray-100 text-gray-500 rounded text-xs select-none">
@@ -741,14 +744,12 @@ const InboundReceiving = ({ material, lc, onSave, onBack }) => {
                                       )}
                                     </td>
 
-                                    {/* Final Qty */}
                                     <td className="px-3 py-2.5 text-center">
                                       <span className={`text-sm font-bold ${totalMissingForBox > 0 ? 'text-orange-700' : 'text-emerald-700'}`}>
                                         {Math.max(0, (box.quantity || 0) - totalMissingForBox).toLocaleString()}
                                       </span>
                                     </td>
 
-                                    {/* Remarks — locked once received */}
                                     <td className="px-3 py-2.5">
                                       {isReceived ? (
                                         <span className="text-xs text-gray-400 italic">{s.remarks || '—'}</span>
@@ -780,10 +781,9 @@ const InboundReceiving = ({ material, lc, onSave, onBack }) => {
             })}
           </div>
 
-          {/* ── RIGHT: Summary + action (original design preserved) ────────── */}
+          {/* ── RIGHT: Summary + action ────────── */}
           <div className="flex flex-col gap-4">
 
-            {/* Overall receipt progress */}
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
               <div className="px-5 py-3.5 border-b border-gray-100 bg-gray-50/60">
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest">Receipt Progress</p>
@@ -858,7 +858,6 @@ const InboundReceiving = ({ material, lc, onSave, onBack }) => {
               </div>
             </div>
 
-            {/* Current batch selection */}
             <div className={`bg-white rounded-xl border overflow-hidden transition-all ${
               selectedCount > 0 ? 'border-blue-200' : 'border-gray-200'
             }`}>
@@ -903,7 +902,6 @@ const InboundReceiving = ({ material, lc, onSave, onBack }) => {
               </div>
             </div>
 
-            {/* Action buttons */}
             <div className="flex flex-col gap-2">
               <button
                 type="submit"

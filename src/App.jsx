@@ -539,13 +539,14 @@ const handleSaveAssignments = (assignments) => {
     }
 
     // Stay on inbound receiving page if partially received so manager can do next batch
-    if (receiptData.is_partial) {
-      // Don't navigate — page re-renders with updated receivedBoxKeys from material state
-      // The InboundReceiving component restores state from material.received_box_keys
-      return;
-    }
+    // if (receiptData.is_partial) {
+    //   // Don't navigate — page re-renders with updated receivedBoxKeys from material state
+    //   // The InboundReceiving component restores state from material.received_box_keys
+    //   return;
+    // }
 
-    navigate('inbound-list');
+    // navigate('inbound-list');
+    return;
   };
 
   // Box Handlers
@@ -956,13 +957,25 @@ case 'shift-assignment':
         );
 
       // ✅ FIXED: Inbound Receiving with proper LC data
-      case 'inbound-receiving':
+      // case 'inbound-receiving':
+      //   return selectedMaterial ? (
+      //     <InboundReceiving 
+      //       material={selectedMaterial}
+      //       lc={lcs.find(l => l.id === selectedMaterial.lc_id)}
+      //       onSave={handleSaveInboundMaterial}
+      //       onBack={() => navigate('inbound-list')}
+      //     />
+      //   ) : null;
+
+
+        case 'inbound-receiving':
         return selectedMaterial ? (
           <InboundReceiving 
             material={selectedMaterial}
             lc={lcs.find(l => l.id === selectedMaterial.lc_id)}
             onSave={handleSaveInboundMaterial}
             onBack={() => navigate('inbound-list')}
+            onComplete={() => navigate('inbound-list')}
           />
         ) : null;
 
