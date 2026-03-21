@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
   Save, Package, AlertTriangle, CheckCircle, Edit, X,
-  Hash, FileText, Users, Calendar, Clock, Info, AlertCircle
+  Hash, FileText, Users, Calendar, Clock, Info, AlertCircle,
+  Lock, Unlock
 } from 'lucide-react';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -31,6 +32,8 @@ const ProductionFloor = ({
   const [editingBox,       setEditingBox]       = useState(null);
   const [isEditingSummary, setIsEditingSummary] = useState(false);
   const [summaryErrors,    setSummaryErrors]    = useState({});
+  // Tracks whether user manually unlocked a completed shift for editing
+  const [manualEditUnlocked, setManualEditUnlocked] = useState(false);
 
   // ── Summary helpers ───────────────────────────────────────────────────────
   const getExistingSummary = (date, shift) => {
@@ -44,6 +47,7 @@ const ProductionFloor = ({
     setShiftSummary(getExistingSummary(selectedDate, selectedShift));
     setIsEditingSummary(false);
     setSummaryErrors({});
+    setManualEditUnlocked(false);
   }, [selectedDate, selectedShift, shiftSummaries]);
 
   // ── Which boxes are visible for this shift? ───────────────────────────────
@@ -117,6 +121,15 @@ const ProductionFloor = ({
   }).length;
 
   const allBoxesUpdated = pendingCount === 0 && nativeBoxes.length > 0;
+
+  // ── Shift is "complete" when all pending boxes are done + summary saved ────
+  // pendingCount===0 is true even when no boxes were issued (nothing pending),
+  // so we require summaryExists to confirm the shift was actively closed out.
+  const summaryExists   = shiftSummaries.some(s => s.date === selectedDate && s.shift === selectedShift);
+  const isShiftComplete = pendingCount === 0 && summaryExists;
+
+  // Page is read-only when shift is complete AND user hasn't manually unlocked it
+  const isReadOnly = isShiftComplete && !manualEditUnlocked;
 
   // ── Chip summary stats ────────────────────────────────────────────────────
   const chipBoxes       = shiftBoxes.filter(isChipBox);
@@ -246,6 +259,7 @@ const ProductionFloor = ({
       });
     }
     setIsEditingSummary(false);
+    setManualEditUnlocked(false); // auto re-lock once summary is saved
   };
 
   const handleSummaryChange = (field, value) => {
@@ -283,17 +297,62 @@ const ProductionFloor = ({
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-gray-900">Production Floor</h1>
-          <p className="text-sm text-gray-400 mt-0.5">Live shift tracking and material consumption</p>
+          <p className="text-sm text-gray-400 mt-0.5">
+            {isReadOnly
+              ? 'Shift completed — viewing in read-only mode'
+              : 'Live shift tracking and material consumption'}
+          </p>
         </div>
-        {pendingCount > 0 && (
-          <div className="flex items-center gap-2 px-3 py-2 bg-orange-50 border border-orange-200 rounded-lg">
-            <AlertTriangle className="w-4 h-4 text-orange-500 flex-shrink-0" />
-            <span className="text-sm font-medium text-orange-800">
-              {pendingCount} box{pendingCount !== 1 ? 'es' : ''} pending update
-            </span>
-          </div>
-        )}
+
+        <div className="flex items-center gap-3">
+          {/* Pending warning — only in edit mode */}
+          {!isReadOnly && pendingCount > 0 && (
+            <div className="flex items-center gap-2 px-3 py-2 bg-orange-50 border border-orange-200 rounded-lg">
+              <AlertTriangle className="w-4 h-4 text-orange-500 flex-shrink-0" />
+              <span className="text-sm font-medium text-orange-800">
+                {pendingCount} box{pendingCount !== 1 ? 'es' : ''} pending update
+              </span>
+            </div>
+          )}
+
+          {/* Read-only badge + Edit Shift button */}
+          {isReadOnly && (
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-emerald-100 text-emerald-700 rounded-lg border border-emerald-200">
+                <Lock className="w-3 h-3" /> Shift Complete
+              </span>
+              <button
+                onClick={() => setManualEditUnlocked(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                <Unlock className="w-3 h-3" /> Edit Shift
+              </button>
+            </div>
+          )}
+
+          {/* Re-lock button — shown when user has manually unlocked a completed shift */}
+          {isShiftComplete && manualEditUnlocked && (
+            <button
+              onClick={() => { setManualEditUnlocked(false); setIsEditingSummary(false); }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
+            >
+              <Lock className="w-3 h-3" /> Lock Shift
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* Read-only info banner */}
+      {isReadOnly && (
+        <div className="flex items-center gap-3 px-4 py-3 bg-emerald-50 border border-emerald-200 rounded-xl">
+          <CheckCircle className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+          <p className="text-sm text-emerald-800">
+            <span className="font-semibold">Shift closed.</span>{' '}
+            All boxes updated and summary saved. Click{' '}
+            <span className="font-semibold">Edit Shift</span> in the top-right to make corrections.
+          </p>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
 
@@ -346,7 +405,9 @@ const ProductionFloor = ({
                       <th className="px-4 py-3 text-right text-xs font-semibold text-gray-400 uppercase tracking-wide">Remaining</th>
                       <th className="px-4 py-3 text-right text-xs font-semibold text-gray-400 uppercase tracking-wide">This Shift</th>
                       <th className="px-4 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wide">Status</th>
-                      <th className="px-5 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wide">Action</th>
+                      {!isReadOnly && (
+                        <th className="px-5 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wide">Action</th>
+                      )}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -458,7 +519,8 @@ const ProductionFloor = ({
                             </span>
                           </td>
 
-                          {/* Action */}
+                          {/* Action — hidden in read-only mode */}
+                          {!isReadOnly && (
                           <td className="px-5 py-3.5 text-center">
                             {box.status === 'Consumed' && shiftStatus === 'Consumed This Shift' ? (
                               <span className="text-xs text-gray-300">—</span>
@@ -474,6 +536,7 @@ const ProductionFloor = ({
                               </button>
                             )}
                           </td>
+                          )}
                         </tr>
                       );
                     })}
@@ -516,12 +579,12 @@ const ProductionFloor = ({
                 <p className="text-sm font-semibold text-gray-900">Shift Production Summary</p>
                 <p className="text-xs text-gray-400 mt-0.5">{selectedDate} — {selectedShift} Shift</p>
               </div>
-              {!isEditingSummary ? (
+              {!isReadOnly && (!isEditingSummary ? (
                 <button
                   onClick={() => setIsEditingSummary(true)}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg hover:bg-blue-700 transition-colors"
                 >
-                  <Edit className="w-3 h-3" /> Edit
+                  <Edit className="w-3 h-3" /> {summaryExists ? 'Edit' : 'Add Summary'}
                 </button>
               ) : (
                 <div className="flex gap-2">
@@ -534,7 +597,7 @@ const ProductionFloor = ({
                     <Save className="w-3 h-3" /> Save
                   </button>
                 </div>
-              )}
+              ))}
             </div>
 
             <div className="p-5 space-y-4">
