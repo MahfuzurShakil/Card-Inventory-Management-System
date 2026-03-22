@@ -632,7 +632,13 @@ const handleSaveAssignments = (assignments) => {
   setSubBoxes(prev => [...prev, newSubBox]);
   // Navigation is handled by BulkPrintModal's onDone (calls onSave per box)
   // After the last box is saved, navigate back
-  navigate('subbox-list');
+  //navigate('subbox-list');
+};
+
+const handleUpdateSubBox = (subBoxId, patch) => {
+  setSubBoxes(prev =>
+    prev.map(sb => sb.id === subBoxId ? { ...sb, ...patch } : sb)
+  );
 };
 
 const handleCreateChallan = (selectedIds = []) => {
@@ -1066,17 +1072,26 @@ case 'shift-assignment':
     />
   );
 
-      case 'subbox-creation':
-        return (
-          <SubBoxCreation 
-            boxes={boxes}
-            employees={employees}
-            productionAssignments={productionAssignments}
-            onSave={handleSaveSubBox}
-            onBack={() => navigate('subbox-list')}
-          />
-        );
-
+      // case 'subbox-creation':
+      //   return (
+      //     <SubBoxCreation 
+      //       boxes={boxes}
+      //       employees={employees}
+      //       productionAssignments={productionAssignments}
+      //       onSave={handleSaveSubBox}
+      //       onBack={() => navigate('subbox-list')}
+      //     />
+      //   );
+case 'subbox-creation':
+  return (
+    <SubBoxCreation
+      onSave={handleSaveSubBox}
+      onUpdateSubBox={handleUpdateSubBox}
+      onBack={() => navigate('subbox-list')}
+      subBoxes={subBoxes}
+      shiftSummaries={shiftSummaries}
+    />
+  );
       case 'client-rejection':
         return selectedSubBox ? (
           <ClientRejection 
