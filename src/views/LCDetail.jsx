@@ -6,54 +6,12 @@ import {
   AlertTriangle, XCircle, FileSpreadsheet, X, Trash2, Info,
   Loader2
 } from 'lucide-react';
-
-// ── Shared UUID validation helpers (same logic as LCForm) ─────────────────────
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const isValidUUID = (str) => UUID_REGEX.test(str);
-const DB_UUIDS = new Set(); // would be populated from API in real app
-
-const parseCSVUUIDs = (text) => {
-  const lines = text.split(/\r?\n/).filter(l => l.trim() !== '');
-  return lines.map(line => {
-    const parts = line.split(/[,;\t|]/);
-    return parts[0].trim().replace(/^["']|["']$/g, '');
-  }).filter(Boolean);
-};
-
-const buildFileSummary = (fileName, rawUuids, allPreviousUuids) => {
-  const seenInFile = new Set();
-  const rows = rawUuids.map((uuid, idx) => {
-    const formatOk = isValidUUID(uuid);
-    const dupInFile = seenInFile.has(uuid.toLowerCase());
-    const dupInSession = !dupInFile && allPreviousUuids.has(uuid.toLowerCase());
-    const dupInDb = !dupInFile && !dupInSession && DB_UUIDS.has(uuid.toLowerCase());
-
-    let status = 'valid', reason = '';
-    if (!formatOk) { status = 'invalid'; reason = 'Invalid UUID format'; }
-    else if (dupInFile) { status = 'duplicate'; reason = 'Duplicate within this file'; }
-    else if (dupInSession) { status = 'duplicate'; reason = 'Duplicate in another uploaded file'; }
-    else if (dupInDb) { status = 'duplicate'; reason = 'Already exists in database'; }
-
-    if (formatOk && !dupInFile) seenInFile.add(uuid.toLowerCase());
-
-    return { rowNum: idx + 1, uuid, status, reason };
-  });
-
-  const valid = rows.filter(r => r.status === 'valid').length;
-  const duplicates = rows.filter(r => r.status === 'duplicate').length;
-  const invalid = rows.filter(r => r.status === 'invalid').length;
-
-  return {
-    fileName,
-    totalRows: rows.length,
-    valid,
-    duplicates,
-    invalid,
-    rows,
-    fileStatus: duplicates > 0 || invalid > 0 ? (valid === 0 ? 'error' : 'warning') : 'ok',
-    validUuids: rows.filter(r => r.status === 'valid').map(r => r.uuid),
-  };
-};
+import {
+  buildChipUidFileSummary,
+  normalizeChipUid,
+  parseChipUidCsv,
+  rehydrateChipUidSummary,
+} from '../utils/chipUidCsv';
 
 // ── Row Detail Modal ──────────────────────────────────────────────────────────
 const RowDetailModal = ({ summary, onClose }) => {
@@ -82,7 +40,9 @@ const RowDetailModal = ({ summary, onClose }) => {
             <thead className="sticky top-0 bg-white">
               <tr className="border-b border-gray-100">
                 <th className="text-left py-2 pr-3 text-gray-400 font-semibold uppercase tracking-wide w-12">Row</th>
-                <th className="text-left py-2 pr-3 text-gray-400 font-semibold uppercase tracking-wide">UUID</th>
+                <th className="text-left py-2 pr-3 text-gray-400 font-semibold uppercase tracking-wide">Box No.</th>
+                <th className="text-left py-2 pr-3 text-gray-400 font-semibold uppercase tracking-wide">Card Serial</th>
+                <th className="text-left py-2 pr-3 text-gray-400 font-semibold uppercase tracking-wide">Smart Card UID</th>
                 <th className="text-left py-2 pr-3 text-gray-400 font-semibold uppercase tracking-wide w-24">Status</th>
                 <th className="text-left py-2 text-gray-400 font-semibold uppercase tracking-wide">Reason</th>
               </tr>
@@ -91,7 +51,9 @@ const RowDetailModal = ({ summary, onClose }) => {
               {summary.rows.map((row) => (
                 <tr key={row.rowNum} className={row.status !== 'valid' ? (row.status === 'duplicate' ? 'bg-amber-50/40' : 'bg-red-50/40') : ''}>
                   <td className="py-2 pr-3 text-gray-400 font-mono">{row.rowNum}</td>
-                  <td className="py-2 pr-3 font-mono text-gray-700 break-all">{row.uuid}</td>
+                  <td className="py-2 pr-3 font-mono text-gray-700">{row.boxNumber || '—'}</td>
+                  <td className="py-2 pr-3 font-mono text-gray-700 break-all">{row.smartCardSerialNumber || '—'}</td>
+                  <td className="py-2 pr-3 font-mono text-gray-700 break-all">{row.smartCardUid || '—'}</td>
                   <td className="py-2 pr-3">
                     <span className="flex items-center gap-1">
                       {statusIcon(row.status)}
@@ -118,35 +80,27 @@ const RowDetailModal = ({ summary, onClose }) => {
   );
 };
 
-// ── UUID CSV Viewer/Editor for LCDetail ───────────────────────────────────────
+// ── Chip UID CSV Viewer/Editor for LCDetail ───────────────────────────────────
 const UUIDCSVSection = ({ uuidFiles = [], onUpdate }) => {
   const [localFiles, setLocalFiles] = useState(() => {
-    // Rebuild summaries if they came from saved state
     if (uuidFiles.length === 0) return [];
     const allPrev = new Set();
-    return uuidFiles.map(s => {
-      if (s.rows) {
-        const rawUuids = s.rows.map(r => r.uuid);
-        const built = buildFileSummary(s.fileName, rawUuids, allPrev);
-        built.validUuids.forEach(u => allPrev.add(u.toLowerCase()));
-        return built;
-      }
-      return s;
-    });
+    return uuidFiles
+      .map(s => rehydrateChipUidSummary(s, allPrev))
+      .filter(Boolean);
   });
   const [isDragging, setIsDragging] = useState(false);
   const [processingFiles, setProcessingFiles] = useState(new Set());
   const [viewingFile, setViewingFile] = useState(null);
   const [saveValidation, setSaveValidation] = useState(null);
-  const fileInputRef = useState(null);
   const inputRef = { current: null };
 
   const recomputeAll = (summaries) => {
     const allPrev = new Set();
     return summaries.map(s => {
-      const rawUuids = s.rows.map(r => r.uuid);
-      const built = buildFileSummary(s.fileName, rawUuids, allPrev);
-      built.validUuids.forEach(u => allPrev.add(u.toLowerCase()));
+      if (s.headerError) return s;
+      const built = buildChipUidFileSummary(s.fileName, s.rows, allPrev);
+      built.validUids.forEach(uid => allPrev.add(normalizeChipUid(uid)));
       return built;
     });
   };
@@ -161,8 +115,21 @@ const UUIDCSVSection = ({ uuidFiles = [], onUpdate }) => {
 
     const newRaw = await Promise.all(validFiles.map(async (file) => {
       const text = await file.text();
-      const rawUuids = parseCSVUUIDs(text);
-      return { fileName: file.name, rows: rawUuids.map((uuid, i) => ({ rowNum: i + 1, uuid })) };
+      const { rows, headerError } = parseChipUidCsv(text);
+      if (headerError) {
+        return {
+          fileName: file.name,
+          totalRows: 0,
+          valid: 0,
+          duplicates: 0,
+          invalid: 1,
+          rows: [],
+          fileStatus: 'error',
+          validUids: [],
+          headerError,
+        };
+      }
+      return { fileName: file.name, rows };
     }));
 
     setLocalFiles(prev => {
@@ -189,8 +156,9 @@ const UUIDCSVSection = ({ uuidFiles = [], onUpdate }) => {
     const errors = [];
     const warnings = [];
     localFiles.forEach(s => {
-      if (s.invalid > 0) errors.push(`"${s.fileName}": ${s.invalid} row(s) have invalid UUID format`);
-      if (s.duplicates > 0) warnings.push(`"${s.fileName}": ${s.duplicates} duplicate UUID(s) will be excluded`);
+      if (s.headerError) errors.push(`"${s.fileName}": ${s.headerError}`);
+      if (s.invalid > 0 && !s.headerError) errors.push(`"${s.fileName}": ${s.invalid} row(s) are missing Smart card UID`);
+      if (s.duplicates > 0) warnings.push(`"${s.fileName}": ${s.duplicates} duplicate Smart card UID(s) will be excluded`);
     });
     setSaveValidation({ errors, warnings, hasErrors: errors.length > 0, hasWarnings: warnings.length > 0 });
     return { errors, warnings, hasErrors: errors.length > 0 };
@@ -231,7 +199,7 @@ const UUIDCSVSection = ({ uuidFiles = [], onUpdate }) => {
   return (
     <div className="space-y-4">
       {/* Upload Zone */}
-      <div
+      {/* <div
         onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
         onDragLeave={() => setIsDragging(false)}
         onDrop={(e) => { e.preventDefault(); setIsDragging(false); processFiles(e.dataTransfer.files); }}
@@ -250,10 +218,10 @@ const UUIDCSVSection = ({ uuidFiles = [], onUpdate }) => {
           <>
             <FileSpreadsheet className="w-8 h-8 text-gray-300 mx-auto mb-2" />
             <p className="text-sm font-semibold text-gray-600">Drop CSV files here or click to add</p>
-            <p className="text-xs text-gray-400 mt-1">One UUID per row (first column) · Multiple files supported</p>
+            <p className="text-xs text-gray-400 mt-1">Required header: Box number;Smart card serial number;Smart card UID</p>
           </>
         )}
-      </div>
+      </div> */}
 
       {/* File summaries */}
       {localFiles.length > 0 && (
@@ -307,7 +275,7 @@ const UUIDCSVSection = ({ uuidFiles = [], onUpdate }) => {
             {[
               { label: 'Total Files', value: totals.files, color: 'text-gray-900', bg: 'bg-gray-50 border-gray-200' },
               { label: 'Total Rows', value: totals.rows, color: 'text-gray-900', bg: 'bg-gray-50 border-gray-200' },
-              { label: 'Valid UUID', value: totals.valid, color: 'text-emerald-700', bg: 'bg-emerald-50 border-emerald-200' },
+              { label: 'Valid UID', value: totals.valid, color: 'text-emerald-700', bg: 'bg-emerald-50 border-emerald-200' },
               {
                 label: 'Dup / Invalid',
                 value: totals.duplicates + totals.invalid,
@@ -327,9 +295,9 @@ const UUIDCSVSection = ({ uuidFiles = [], onUpdate }) => {
             <button type="button"
               onClick={handleValidateSave}
               className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-violet-700 border border-violet-200 bg-violet-50 rounded-lg hover:bg-violet-100 transition-colors">
-              <CheckCircle2 className="w-4 h-4" /> Validate UUIDs
+              <CheckCircle2 className="w-4 h-4" /> Validate UIDs
             </button>
-            <span className="text-xs text-gray-400">Run validation to check for save-time issues</span>
+            <span className="text-xs text-gray-400">Run validation to check header, missing UID, and duplicate UID issues</span>
           </div>
 
           {/* Save-time validation messages */}
@@ -351,7 +319,7 @@ const UUIDCSVSection = ({ uuidFiles = [], onUpdate }) => {
                 <div className="flex items-start gap-2 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl">
                   <Info className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
                   <p className="text-xs text-blue-800">
-                    Only <strong>{totals.valid} valid UUIDs</strong> will be saved. Duplicates and invalid rows are excluded.
+                    Only <strong>{totals.valid} valid Smart card UIDs</strong> will be saved. Duplicates are excluded.
                   </p>
                 </div>
               )}
@@ -359,7 +327,7 @@ const UUIDCSVSection = ({ uuidFiles = [], onUpdate }) => {
                 <div className="flex items-start gap-2 px-4 py-3 bg-emerald-50 border border-emerald-200 rounded-xl">
                   <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0 mt-0.5" />
                   <p className="text-xs text-emerald-800">
-                    All <strong>{totals.valid} UUIDs</strong> passed validation — ready to save.
+                    All <strong>{totals.valid} Smart card UIDs</strong> passed validation — ready to save.
                   </p>
                 </div>
               )}
@@ -378,7 +346,12 @@ const UUIDCSVSection = ({ uuidFiles = [], onUpdate }) => {
 const LCDetail = ({ lc, onBack, onSelectShipment, onAddShipment }) => {
   const [expandedShipment, setExpandedShipment] = useState(null);
   const [uuidSectionOpen, setUuidSectionOpen] = useState(true);
-  const [uuidFiles, setUuidFiles] = useState(lc?.uuid_files || []);
+  const [uuidFiles, setUuidFiles] = useState(() => {
+    const allPrev = new Set();
+    return (lc?.uuid_files || [])
+      .map(summary => rehydrateChipUidSummary(summary, allPrev))
+      .filter(Boolean);
+  });
 
   const steps = [
     { id: 1, name: 'Freight Forwarder', key: 'freight_forwarder', icon: Ship, color: 'blue' },
@@ -400,7 +373,7 @@ const LCDetail = ({ lc, onBack, onSelectShipment, onAddShipment }) => {
     });
   };
 
-  // UUID totals
+  // Chip UID totals
   const uuidTotals = uuidFiles.reduce((acc, s) => ({
     files: acc.files + 1,
     valid: acc.valid + (s.valid || 0),
@@ -630,7 +603,7 @@ const LCDetail = ({ lc, onBack, onSelectShipment, onAddShipment }) => {
             </div>
           </div>
 
-          {/* ── Chip UUID CSV Section ── */}
+          {/* ── Chip UID CSV Section ── */}
           <div>
             <button
               type="button"
@@ -639,10 +612,10 @@ const LCDetail = ({ lc, onBack, onSelectShipment, onAddShipment }) => {
             >
               <span className="flex items-center gap-2">
                 <Hash className="w-4 h-4 text-violet-600" />
-                Chip UUID CSV Files
+                Chip UID CSV Files
                 {uuidTotals.files > 0 && (
                   <span className="ml-2 inline-flex items-center gap-1.5 px-2.5 py-0.5 text-xs font-semibold bg-violet-100 text-violet-700 rounded-full">
-                    {uuidTotals.files} file{uuidTotals.files !== 1 ? 's' : ''} · {uuidTotals.valid} valid UUID{uuidTotals.valid !== 1 ? 's' : ''}
+                    {uuidTotals.files} file{uuidTotals.files !== 1 ? 's' : ''} · {uuidTotals.valid} valid UID{uuidTotals.valid !== 1 ? 's' : ''}
                   </span>
                 )}
                 {uuidTotals.files === 0 && (

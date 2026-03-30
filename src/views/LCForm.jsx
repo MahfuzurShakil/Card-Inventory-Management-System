@@ -5,69 +5,14 @@ import {
   AlertTriangle, XCircle, Eye, Trash2, FileSpreadsheet,
   ChevronDown, ChevronUp, Info, X, Loader2
 } from 'lucide-react';
+import {
+  buildChipUidFileSummary,
+  collectExistingChipUids,
+  normalizeChipUid,
+  parseChipUidCsv,
+} from '../utils/chipUidCsv';
 
-// ── UUID CSV Upload Component ─────────────────────────────────────────────────
-
-// Simulated "DB" of already-used UUIDs across all LCs (in a real app, this would be an API call)
-// For demo purposes we store them in module scope so they persist across renders
-const DB_UUIDS = new Set([
-  // Add some pre-existing UUIDs to demonstrate DB-level duplicate detection
-  // 'existing-uuid-1', 'existing-uuid-2'
-]);
-
-const parseCSVUUIDs = (text) => {
-  const lines = text.split(/\r?\n/).filter(l => l.trim() !== '');
-  const uuids = [];
-  for (const line of lines) {
-    // Support comma, semicolon, tab, or pipe delimited — grab first column
-    const parts = line.split(/[,;\t|]/);
-    const raw = parts[0].trim().replace(/^["']|["']$/g, '');
-    if (raw) uuids.push(raw);
-  }
-  return uuids;
-};
-
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-const isValidUUID = (str) => UUID_REGEX.test(str);
-
-const buildFileSummary = (fileName, rawUuids, allPreviousUuids) => {
-  const seenInFile = new Set();
-  const rows = rawUuids.map((uuid, idx) => {
-    const rowNum = idx + 1;
-    const formatOk = isValidUUID(uuid);
-    const dupInFile = seenInFile.has(uuid.toLowerCase());
-    const dupInSession = !dupInFile && allPreviousUuids.has(uuid.toLowerCase());
-    const dupInDb = !dupInFile && !dupInSession && DB_UUIDS.has(uuid.toLowerCase());
-    
-    let status = 'valid';
-    let reason = '';
-    if (!formatOk) { status = 'invalid'; reason = 'Invalid UUID format'; }
-    else if (dupInFile) { status = 'duplicate'; reason = 'Duplicate within this file'; }
-    else if (dupInSession) { status = 'duplicate'; reason = 'Duplicate in another uploaded file'; }
-    else if (dupInDb) { status = 'duplicate'; reason = 'Already exists in database'; }
-
-    if (formatOk && !dupInFile) seenInFile.add(uuid.toLowerCase());
-
-    return { rowNum, uuid, status, reason };
-  });
-
-  const valid = rows.filter(r => r.status === 'valid').length;
-  const duplicates = rows.filter(r => r.status === 'duplicate').length;
-  const invalid = rows.filter(r => r.status === 'invalid').length;
-
-  return {
-    fileName,
-    totalRows: rows.length,
-    valid,
-    duplicates,
-    invalid,
-    rows,
-    // overall file status
-    fileStatus: duplicates > 0 || invalid > 0 ? (valid === 0 ? 'error' : 'warning') : 'ok',
-    validUuids: rows.filter(r => r.status === 'valid').map(r => r.uuid),
-  };
-};
+// ── Chip UID CSV Upload Component ─────────────────────────────────────────────
 
 // Row Detail Modal
 const RowDetailModal = ({ summary, onClose }) => {
@@ -97,7 +42,9 @@ const RowDetailModal = ({ summary, onClose }) => {
             <thead className="sticky top-0 bg-white">
               <tr className="border-b border-gray-100">
                 <th className="text-left py-2 pr-3 text-gray-400 font-semibold uppercase tracking-wide w-12">Row</th>
-                <th className="text-left py-2 pr-3 text-gray-400 font-semibold uppercase tracking-wide">UUID</th>
+                <th className="text-left py-2 pr-3 text-gray-400 font-semibold uppercase tracking-wide">Box No.</th>
+                <th className="text-left py-2 pr-3 text-gray-400 font-semibold uppercase tracking-wide">Card Serial</th>
+                <th className="text-left py-2 pr-3 text-gray-400 font-semibold uppercase tracking-wide">Smart Card UID</th>
                 <th className="text-left py-2 pr-3 text-gray-400 font-semibold uppercase tracking-wide w-20">Status</th>
                 <th className="text-left py-2 text-gray-400 font-semibold uppercase tracking-wide">Reason</th>
               </tr>
@@ -108,7 +55,9 @@ const RowDetailModal = ({ summary, onClose }) => {
                   ${row.status === 'valid' ? '' : row.status === 'duplicate' ? 'bg-amber-50/40' : 'bg-red-50/40'}
                 `}>
                   <td className="py-2 pr-3 text-gray-400 font-mono">{row.rowNum}</td>
-                  <td className="py-2 pr-3 font-mono text-gray-700 break-all">{row.uuid}</td>
+                  <td className="py-2 pr-3 font-mono text-gray-700">{row.boxNumber || '—'}</td>
+                  <td className="py-2 pr-3 font-mono text-gray-700 break-all">{row.smartCardSerialNumber || '—'}</td>
+                  <td className="py-2 pr-3 font-mono text-gray-700 break-all">{row.smartCardUid || '—'}</td>
                   <td className="py-2 pr-3">
                     <span className="flex items-center gap-1">
                       {statusIcon(row.status)}
@@ -135,7 +84,7 @@ const RowDetailModal = ({ summary, onClose }) => {
   );
 };
 
-const UUIDCSVUpload = ({ value = [], onChange, lcId = null }) => {
+const UUIDCSVUpload = ({ value = [], onChange, onRegisterValidator, usedUids }) => {
   const [fileSummaries, setFileSummaries] = useState(value || []);
   const [isDragging, setIsDragging] = useState(false);
   const [processingFiles, setProcessingFiles] = useState(new Set());
@@ -146,20 +95,25 @@ const UUIDCSVUpload = ({ value = [], onChange, lcId = null }) => {
   // Keep parent in sync
   useEffect(() => {
     onChange(fileSummaries);
-  }, [fileSummaries]);
+  }, [fileSummaries, onChange]);
 
   // Recompute duplicates across all files whenever summaries change
   const recomputeAll = useCallback((summaries) => {
     const allPrev = new Set();
     const recomputed = summaries.map((s) => {
-      const rawUuids = s.rows.map(r => r.uuid);
-      const newSummary = buildFileSummary(s.fileName, rawUuids, allPrev);
-      // Add valid UUIDs of this file to allPrev for next files
-      newSummary.validUuids.forEach(u => allPrev.add(u.toLowerCase()));
+      if (s.headerError) return s;
+      const rawRows = (s.rows || []).map((row) => ({
+        rowNum: row.rowNum,
+        boxNumber: row.boxNumber || '',
+        smartCardSerialNumber: row.smartCardSerialNumber || '',
+        smartCardUid: row.smartCardUid || row.uuid || '',
+      }));
+      const newSummary = buildChipUidFileSummary(s.fileName, rawRows, allPrev, usedUids);
+      newSummary.validUids.forEach(uid => allPrev.add(normalizeChipUid(uid)));
       return newSummary;
     });
     return recomputed;
-  }, []);
+  }, [usedUids]);
 
   const processFiles = async (files) => {
     const validFiles = Array.from(files).filter(f =>
@@ -172,23 +126,31 @@ const UUIDCSVUpload = ({ value = [], onChange, lcId = null }) => {
 
     const newSummaries = await Promise.all(validFiles.map(async (file) => {
       const text = await file.text();
-      const rawUuids = parseCSVUUIDs(text);
-      return { fileName: file.name, rows: rawUuids.map((uuid, i) => ({ rowNum: i + 1, uuid })) };
+      const { rows, headerError } = parseChipUidCsv(text);
+      if (headerError) {
+        return {
+          fileName: file.name,
+          totalRows: 0,
+          valid: 0,
+          duplicates: 0,
+          invalid: 1,
+          rows: [],
+          fileStatus: 'error',
+          validUids: [],
+          headerError,
+        };
+      }
+      return { fileName: file.name, rows };
     }));
 
     setFileSummaries(prev => {
-      // Remove files with same name (replace)
       const filtered = prev.filter(p => !validFiles.some(f => f.name === p.fileName));
-      const combined = [
-        ...filtered,
-        ...newSummaries.map(s => ({ fileName: s.fileName, rows: s.rows.map(r => ({ rowNum: r.rowNum, uuid: r.uuid })) }))
-      ];
-      // Now recompute all with full dedup
+      const combined = [...filtered, ...newSummaries];
       const allPrev = new Set();
       return combined.map(s => {
-        const rawUuids = s.rows.map(r => r.uuid);
-        const summary = buildFileSummary(s.fileName, rawUuids, allPrev);
-        summary.validUuids.forEach(u => allPrev.add(u.toLowerCase()));
+        if (s.headerError) return s;
+        const summary = buildChipUidFileSummary(s.fileName, s.rows, allPrev, usedUids);
+        summary.validUids.forEach(uid => allPrev.add(normalizeChipUid(uid)));
         return summary;
       });
     });
@@ -212,24 +174,22 @@ const UUIDCSVUpload = ({ value = [], onChange, lcId = null }) => {
   };
 
   // Validate before save — called externally by the form
-  const validateForSave = () => {
+  const validateForSave = useCallback(() => {
     const errors = [];
     const warnings = [];
     fileSummaries.forEach(s => {
-      if (s.duplicates > 0) warnings.push(`"${s.fileName}": ${s.duplicates} duplicate UUID(s) will be skipped`);
-      if (s.invalid > 0) errors.push(`"${s.fileName}": ${s.invalid} row(s) have invalid UUID format`);
+      if (s.headerError) errors.push(`"${s.fileName}": ${s.headerError}`);
+      if (s.duplicates > 0) warnings.push(`"${s.fileName}": ${s.duplicates} duplicate Smart card UID(s) will be skipped`);
+      if (s.invalid > 0 && !s.headerError) errors.push(`"${s.fileName}": ${s.invalid} row(s) are missing Smart card UID`);
     });
     const result = { errors, warnings, hasErrors: errors.length > 0, hasWarnings: warnings.length > 0 };
     setSaveValidation(result);
     return result;
-  };
-
-  // Expose validateForSave via ref-like pattern using a callback on the onChange
-  // We'll store it on the component instance via a hidden prop trick
-  useEffect(() => {
-    // Store validate function reference so parent can call it
-    if (onChange._setValidator) onChange._setValidator(validateForSave);
   }, [fileSummaries]);
+
+  useEffect(() => {
+    if (onRegisterValidator) onRegisterValidator(validateForSave);
+  }, [onRegisterValidator, validateForSave]);
 
   // Totals
   const totals = fileSummaries.reduce((acc, s) => ({
@@ -293,7 +253,7 @@ const UUIDCSVUpload = ({ value = [], onChange, lcId = null }) => {
             <FileSpreadsheet className="w-10 h-10 text-gray-300 mx-auto mb-3" />
             <p className="text-sm font-semibold text-gray-700">Drop CSV files here or click to browse</p>
             <p className="text-xs text-gray-400 mt-1">
-              Supports .csv and .txt · One UUID per row (first column) · Multiple files allowed
+              Required header: Box number;Smart card serial number;Smart card UID · Multiple files allowed
             </p>
           </>
         )}
@@ -386,7 +346,7 @@ const UUIDCSVUpload = ({ value = [], onChange, lcId = null }) => {
             <div className="flex items-start gap-2 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl">
               <Info className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
               <p className="text-xs text-blue-800">
-                Only <strong>valid, non-duplicate UUIDs</strong> ({totals.valid}) will be saved. Duplicates and invalid rows will be ignored.
+                Only <strong>valid, non-duplicate Smart card UIDs</strong> ({totals.valid}) will be saved. Duplicate rows will be ignored.
               </p>
             </div>
           )}
@@ -401,58 +361,35 @@ const UUIDCSVUpload = ({ value = [], onChange, lcId = null }) => {
 
 // ── Main LCForm Component ─────────────────────────────────────────────────────
 
-const LCForm = ({ lc, onSave, onBack }) => {
+const buildInitialFormData = (lc) => ({
+  lc_number: lc?.lc_number || '',
+  lc_issue_date: lc?.lc_issue_date || '',
+  bank_name: lc?.bank_name || '',
+  lc_value_foreign: lc?.lc_value_foreign || '',
+  lc_currency: lc?.lc_currency || 'USD',
+  lc_value_bdt: lc?.lc_value_bdt || '',
+  exchange_rate: lc?.exchange_rate || '',
+  pi_number: lc?.pi_number || '',
+  pi_date: lc?.pi_date || '',
+  insurance_bill_amount: lc?.insurance_bill_amount || '',
+  cover_note_number: lc?.cover_note_number || '',
+  insurance_issue_date: lc?.insurance_issue_date || '',
+  insurance_company_name: lc?.insurance_company_name || '',
+  quantity: lc?.quantity || '',
+  item_description: lc?.item_description || '',
+  status: lc?.status || 'Active',
+  files: { lc_doc: null, pi_doc: null, insurance_doc: null }
+});
+
+const LCForm = ({ lc, onSave, onBack, existingLcs = [] }) => {
   const isEditMode = !!(lc && lc.id);
   const uuidValidatorRef = useRef(null);
+  const existingUsedUids = collectExistingChipUids(existingLcs, lc?.id);
 
-  const [formData, setFormData] = useState({
-    lc_number: '',
-    lc_issue_date: '',
-    bank_name: '',
-    lc_value_foreign: '',
-    lc_currency: 'USD',
-    lc_value_bdt: '',
-    exchange_rate: '',
-    pi_number: '',
-    pi_date: '',
-    insurance_bill_amount: '',
-    cover_note_number: '',
-    insurance_issue_date: '',
-    insurance_company_name: '',
-    quantity: '',
-    item_description: '',
-    status: 'Active',
-    files: { lc_doc: null, pi_doc: null, insurance_doc: null }
-  });
+  const [formData, setFormData] = useState(() => buildInitialFormData(lc));
 
   const [uuidFiles, setUuidFiles] = useState(lc?.uuid_files || []);
   const [uuidSaveError, setUuidSaveError] = useState(null);
-
-  useEffect(() => {
-    if (isEditMode && lc) {
-      setFormData(prev => ({
-        ...prev,
-        lc_number: lc.lc_number || '',
-        lc_issue_date: lc.lc_issue_date || '',
-        bank_name: lc.bank_name || '',
-        lc_value_foreign: lc.lc_value_foreign || '',
-        lc_currency: lc.lc_currency || 'USD',
-        lc_value_bdt: lc.lc_value_bdt || '',
-        exchange_rate: lc.exchange_rate || '',
-        pi_number: lc.pi_number || '',
-        pi_date: lc.pi_date || '',
-        insurance_bill_amount: lc.insurance_bill_amount || '',
-        cover_note_number: lc.cover_note_number || '',
-        insurance_issue_date: lc.insurance_issue_date || '',
-        insurance_company_name: lc.insurance_company_name || '',
-        quantity: lc.quantity || '',
-        item_description: lc.item_description || '',
-        status: lc.status || 'Active',
-        files: { lc_doc: null, pi_doc: null, insurance_doc: null }
-      }));
-      if (lc.uuid_files) setUuidFiles(lc.uuid_files);
-    }
-  }, [lc, isEditMode]);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -471,23 +408,21 @@ const LCForm = ({ lc, onSave, onBack }) => {
     setUuidFiles(summaries);
     setUuidSaveError(null);
   };
-  // Inject validator reference into the onChange object (hack-free pattern)
-  handleUuidFilesChange._setValidator = (fn) => { uuidValidatorRef.current = fn; };
 
   const handleSubmit = (e) => {
     e.preventDefault();
 
-    // Run UUID save-time validation
+    // Run Smart card UID save-time validation
     if (uuidValidatorRef.current) {
       const result = uuidValidatorRef.current();
       if (result.hasErrors) {
-        setUuidSaveError('Please fix UUID validation errors before saving.');
+        setUuidSaveError('Please fix Smart card UID validation errors before saving.');
         return;
       }
     }
 
-    // Collect only valid UUIDs across all files
-    const allValidUuids = uuidFiles.flatMap(s => s.validUuids || []);
+    // Collect only valid Smart card UIDs across all files
+    const allValidUids = uuidFiles.flatMap(s => s.validUids || []);
 
     const lcData = {
       lc_number: formData.lc_number,
@@ -510,19 +445,11 @@ const LCForm = ({ lc, onSave, onBack }) => {
       pi_doc: formData.files.pi_doc?.name || null,
       insurance_doc: formData.files.insurance_doc?.name || null,
       uuid_files: uuidFiles,         // full file summaries
-      chip_uuids: allValidUuids,     // flat list of valid UUIDs
+      chip_uuids: allValidUids,      // flat list of valid Smart card UIDs
     };
 
     onSave(lcData);
   };
-
-  // Totals for the UUID section summary
-  const uuidTotals = uuidFiles.reduce((acc, s) => ({
-    files: acc.files + 1,
-    rows: acc.rows + (s.totalRows || 0),
-    valid: acc.valid + (s.valid || 0),
-    duplicates: acc.duplicates + (s.duplicates || 0),
-  }), { files: 0, rows: 0, valid: 0, duplicates: 0 });
 
   return (
     <div className="space-y-6">
@@ -760,24 +687,25 @@ const LCForm = ({ lc, onSave, onBack }) => {
           </div>
         </div>
 
-        {/* ── Chip UUID CSV Upload ── */}
+        {/* ── Chip UID CSV Upload ── */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200">
           <div className="px-6 py-4 border-b border-gray-200">
             <div className="flex items-center gap-2">
               <Hash className="w-5 h-5 text-violet-600" />
-              <h2 className="text-lg font-semibold text-gray-900">Chip UUID CSV Upload</h2>
-              <span className="ml-1 px-2 py-0.5 text-xs font-semibold bg-violet-100 text-violet-700 rounded-full">Optional</span>
+              <h2 className="text-lg font-semibold text-gray-900">Chip UID CSV Upload</h2>
+              {/* <span className="ml-1 px-2 py-0.5 text-xs font-semibold bg-violet-100 text-violet-700 rounded-full">Optional</span> */}
             </div>
             <p className="text-sm text-gray-500 mt-1 ml-7">
-              Upload one or more CSV files containing Chip UUIDs. Each file should have one UUID per row in the first column.
-              Duplicates and invalid UUIDs are detected at upload time and at save time.
+              Upload one or more CSV files with the header <span className="font-mono">Box number;Smart card serial number;Smart card UID</span>.
+              Uniqueness is checked on the <span className="font-medium">Smart card UID</span> column.
             </p>
           </div>
           <div className="p-6">
             <UUIDCSVUpload
               value={uuidFiles}
               onChange={handleUuidFilesChange}
-              lcId={lc?.id}
+              onRegisterValidator={(fn) => { uuidValidatorRef.current = fn; }}
+              usedUids={existingUsedUids}
             />
 
             {uuidSaveError && (
@@ -791,9 +719,9 @@ const LCForm = ({ lc, onSave, onBack }) => {
               <div className="mt-4 flex items-start gap-2 px-4 py-3 bg-violet-50 border border-violet-200 rounded-xl">
                 <Info className="w-4 h-4 text-violet-500 flex-shrink-0 mt-0.5" />
                 <p className="text-xs text-violet-800">
-                  <strong>{uuidFiles.reduce((s, f) => s + (f.valid || 0), 0)} valid UUIDs</strong> from{' '}
+                  <strong>{uuidFiles.reduce((s, f) => s + (f.valid || 0), 0)} valid Smart card UIDs</strong> from{' '}
                   {uuidFiles.length} file(s) will be saved with this LC.
-                  Duplicates and invalid rows are excluded automatically.
+                  Duplicate or missing-UID rows are excluded automatically.
                 </p>
               </div>
             )}
@@ -818,3 +746,4 @@ const LCForm = ({ lc, onSave, onBack }) => {
 };
 
 export default LCForm;
+

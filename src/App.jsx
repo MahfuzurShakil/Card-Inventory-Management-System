@@ -867,6 +867,7 @@ const handlePaymentSave = (finKey, payments) => {
         return (
           <LCForm 
             lc={selectedLC} 
+            existingLcs={lcs}
             onSave={handleSaveLC} 
             onBack={() => navigate('lc-list')} 
           />
