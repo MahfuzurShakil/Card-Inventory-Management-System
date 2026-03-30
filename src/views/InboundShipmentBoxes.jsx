@@ -69,24 +69,98 @@ function BarcodeSVG({ value, width = 260, height = 56, fontSize = 10 }) {
   );
 }
 
+// function barcodeBase64(value) {
+//   const W = 520, H = 110, fs = 13;
+//   const bits = encode128(value);
+//   const mw = W / bits.length, barH = H - fs - 4;
+//   let rects = '', x = 0, inBar = false, barX = 0;
+//   for (let i = 0; i <= bits.length; i++) {
+//     const on = i < bits.length && bits[i] === '1';
+//     if (on && !inBar) { barX = x; inBar = true; }
+//     if (!on && inBar) { rects += `<rect x="${barX.toFixed(3)}" y="0" width="${(x - barX).toFixed(3)}" height="${barH}" fill="#000"/>`; inBar = false; }
+//     x += mw;
+//   }
+//   const svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">` +
+//     `<rect width="${W}" height="${H}" fill="white"/>${rects}` +
+//     `<text x="${W/2}" y="${H-1}" text-anchor="middle" font-size="${fs}" font-family="monospace" fill="#000">${value}</text></svg>`;
+//   return 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
+// }
+
 function barcodeBase64(value) {
-  const W = 520, H = 110, fs = 13;
+  const W = 520, H = 120, fs = 14;   // H: 110→120, fs: 13→14
   const bits = encode128(value);
-  const mw = W / bits.length, barH = H - fs - 4;
+  const mw = W / bits.length, barH = H - fs - 6;  // 6px gap above text
   let rects = '', x = 0, inBar = false, barX = 0;
   for (let i = 0; i <= bits.length; i++) {
     const on = i < bits.length && bits[i] === '1';
     if (on && !inBar) { barX = x; inBar = true; }
-    if (!on && inBar) { rects += `<rect x="${barX.toFixed(3)}" y="0" width="${(x - barX).toFixed(3)}" height="${barH}" fill="#000"/>`; inBar = false; }
+    if (!on && inBar) {
+      rects += `<rect x="${barX.toFixed(3)}" y="0" width="${(x - barX).toFixed(3)}" height="${barH}" fill="#000"/>`;
+      inBar = false;
+    }
     x += mw;
   }
-  const svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">` +
-    `<rect width="${W}" height="${H}" fill="white"/>${rects}` +
-    `<text x="${W/2}" y="${H-1}" text-anchor="middle" font-size="${fs}" font-family="monospace" fill="#000">${value}</text></svg>`;
+  const svg =
+    `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">` +
+    `<rect width="${W}" height="${H}" fill="white"/>` +
+    rects +
+    `<text x="${W / 2}" y="${H - 1}" text-anchor="middle" font-size="${fs}" font-family="monospace" fill="#000">${value}</text>` +
+    `</svg>`;
   return 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
 }
+ 
 
 // ── Print window — 100×60 mm Zebra labels (matches InboundReceiving exactly) ──
+// function openPrintWindow(boxList, shipmentNumber) {
+//   const labels = boxList.map(box => {
+//     const src = barcodeBase64(box.barcode);
+//     return `
+//     <div class="label">
+//       <div class="top-row">
+//         <span class="label-title">Material Box Label</span>
+//         <span class="shipment">${shipmentNumber}</span>
+//       </div>
+//       <div class="box-name">${box.box_name}</div>
+//       <img class="bc" src="${src}" alt="${box.barcode}" />
+//       <div class="meta">
+//         <span><b>Item:</b> ${box.item_name || box.item_type || ''}</span>
+//         <span><b>Qty:</b> ${(box.quantity || 0).toLocaleString()}</span>
+//       </div>
+//     </div>`;
+//   }).join('');
+
+//   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/>
+// <title>Labels — ${shipmentNumber}</title>
+// <style>
+//   @page { size: 100mm 60mm; margin: 0; }
+//   * { margin:0; padding:0; box-sizing:border-box; }
+//   body { font-family: Arial, sans-serif; background:#fff; }
+//   .label {
+//     width:100mm; height:60mm; padding:3mm 4mm;
+//     display:flex; flex-direction:column; justify-content:space-between;
+//     page-break-after:always; background:#fff; overflow:hidden;
+//   }
+//   .label:last-child { page-break-after:avoid; }
+//   .top-row { display:flex; justify-content:space-between; align-items:center; }
+//   .label-title { font-size:7pt; font-weight:700; color:#6b7280; letter-spacing:1.5px; text-transform:uppercase; }
+//   .shipment { font-size:7pt; color:#9ca3af; }
+//   .box-name { font-size:13pt; font-weight:800; color:#111827; text-align:center; letter-spacing:0.5px; }
+//   .bc { width:100%; height:auto; display:block; max-height:26mm; }
+//   .meta { display:flex; justify-content:space-between; font-size:8pt; color:#374151; border-top:0.5pt solid #e5e7eb; padding-top:1.5mm; }
+// </style>
+// </head><body>
+// ${labels}
+// <script>window.onload=function(){setTimeout(function(){window.print();},400);};<\/script>
+// </body></html>`;
+
+//   const w = window.open('', '_blank', 'width=500,height=400');
+//   if (w) { w.document.open(); w.document.write(html); w.document.close(); }
+// }
+
+
+// ── Replace the existing openPrintWindow function in InboundShipmentBoxes.jsx ──
+// Only this function needs to change — no other logic is touched.
+ 
 function openPrintWindow(boxList, shipmentNumber) {
   const labels = boxList.map(box => {
     const src = barcodeBase64(box.barcode);
@@ -104,31 +178,84 @@ function openPrintWindow(boxList, shipmentNumber) {
       </div>
     </div>`;
   }).join('');
-
+ 
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/>
 <title>Labels — ${shipmentNumber}</title>
 <style>
   @page { size: 100mm 60mm; margin: 0; }
-  * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family: Arial, sans-serif; background:#fff; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: Arial, sans-serif; background: #fff; }
   .label {
-    width:100mm; height:60mm; padding:3mm 4mm;
-    display:flex; flex-direction:column; justify-content:space-between;
-    page-break-after:always; background:#fff; overflow:hidden;
+    width: 100mm;
+    height: 60mm;
+    padding: 4mm 5mm 3mm 5mm;   /* top padding increased from 3mm → 4mm */
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    page-break-after: always;
+    background: #fff;
+    overflow: hidden;
   }
-  .label:last-child { page-break-after:avoid; }
-  .top-row { display:flex; justify-content:space-between; align-items:center; }
-  .label-title { font-size:7pt; font-weight:700; color:#6b7280; letter-spacing:1.5px; text-transform:uppercase; }
-  .shipment { font-size:7pt; color:#9ca3af; }
-  .box-name { font-size:13pt; font-weight:800; color:#111827; text-align:center; letter-spacing:0.5px; }
-  .bc { width:100%; height:auto; display:block; max-height:26mm; }
-  .meta { display:flex; justify-content:space-between; font-size:8pt; color:#374151; border-top:0.5pt solid #e5e7eb; padding-top:1.5mm; }
+  .label:last-child { page-break-after: avoid; }
+ 
+  /* Top row: "MATERIAL BOX LABEL" left, shipment# right */
+  .top-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1mm;          /* small gap below header row */
+  }
+  .label-title {
+    font-size: 8pt;              /* was 7pt — slightly bigger */
+    font-weight: 700;
+    color: #555;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  .shipment {
+    font-size: 8pt;              /* was 7pt */
+    color: #555;
+    font-weight: 600;
+  }
+ 
+  /* Box name — big and bold */
+  .box-name {
+    font-size: 15pt;             /* was 13pt */
+    font-weight: 800;
+    color: #111827;
+    text-align: center;
+    letter-spacing: 0.3px;
+    line-height: 1.1;
+  }
+ 
+  /* Barcode image */
+  .bc {
+    width: 100%;
+    height: auto;
+    display: block;
+    max-height: 22mm;            /* slightly tighter to give meta more room */
+  }
+ 
+  /* Item / Qty row */
+  .meta {
+    display: flex;
+    justify-content: space-between;
+    font-size: 9pt;              /* was 8pt — now readable */
+    font-weight: 600;            /* was normal — now bolder */
+    color: #222;
+    border-top: 0.6pt solid #ccc;
+    padding-top: 1.5mm;
+  }
+ 
+  @media print {
+    body { margin: 0; }
+  }
 </style>
 </head><body>
 ${labels}
 <script>window.onload=function(){setTimeout(function(){window.print();},400);};<\/script>
 </body></html>`;
-
+ 
   const w = window.open('', '_blank', 'width=500,height=400');
   if (w) { w.document.open(); w.document.write(html); w.document.close(); }
 }

@@ -1,11 +1,409 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   ArrowLeft, Save, FileText, DollarSign, Shield, 
-  Upload, Calendar, Building2
+  Upload, Calendar, Building2, Hash, CheckCircle2,
+  AlertTriangle, XCircle, Eye, Trash2, FileSpreadsheet,
+  ChevronDown, ChevronUp, Info, X, Loader2
 } from 'lucide-react';
+
+// ── UUID CSV Upload Component ─────────────────────────────────────────────────
+
+// Simulated "DB" of already-used UUIDs across all LCs (in a real app, this would be an API call)
+// For demo purposes we store them in module scope so they persist across renders
+const DB_UUIDS = new Set([
+  // Add some pre-existing UUIDs to demonstrate DB-level duplicate detection
+  // 'existing-uuid-1', 'existing-uuid-2'
+]);
+
+const parseCSVUUIDs = (text) => {
+  const lines = text.split(/\r?\n/).filter(l => l.trim() !== '');
+  const uuids = [];
+  for (const line of lines) {
+    // Support comma, semicolon, tab, or pipe delimited — grab first column
+    const parts = line.split(/[,;\t|]/);
+    const raw = parts[0].trim().replace(/^["']|["']$/g, '');
+    if (raw) uuids.push(raw);
+  }
+  return uuids;
+};
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const isValidUUID = (str) => UUID_REGEX.test(str);
+
+const buildFileSummary = (fileName, rawUuids, allPreviousUuids) => {
+  const seenInFile = new Set();
+  const rows = rawUuids.map((uuid, idx) => {
+    const rowNum = idx + 1;
+    const formatOk = isValidUUID(uuid);
+    const dupInFile = seenInFile.has(uuid.toLowerCase());
+    const dupInSession = !dupInFile && allPreviousUuids.has(uuid.toLowerCase());
+    const dupInDb = !dupInFile && !dupInSession && DB_UUIDS.has(uuid.toLowerCase());
+    
+    let status = 'valid';
+    let reason = '';
+    if (!formatOk) { status = 'invalid'; reason = 'Invalid UUID format'; }
+    else if (dupInFile) { status = 'duplicate'; reason = 'Duplicate within this file'; }
+    else if (dupInSession) { status = 'duplicate'; reason = 'Duplicate in another uploaded file'; }
+    else if (dupInDb) { status = 'duplicate'; reason = 'Already exists in database'; }
+
+    if (formatOk && !dupInFile) seenInFile.add(uuid.toLowerCase());
+
+    return { rowNum, uuid, status, reason };
+  });
+
+  const valid = rows.filter(r => r.status === 'valid').length;
+  const duplicates = rows.filter(r => r.status === 'duplicate').length;
+  const invalid = rows.filter(r => r.status === 'invalid').length;
+
+  return {
+    fileName,
+    totalRows: rows.length,
+    valid,
+    duplicates,
+    invalid,
+    rows,
+    // overall file status
+    fileStatus: duplicates > 0 || invalid > 0 ? (valid === 0 ? 'error' : 'warning') : 'ok',
+    validUuids: rows.filter(r => r.status === 'valid').map(r => r.uuid),
+  };
+};
+
+// Row Detail Modal
+const RowDetailModal = ({ summary, onClose }) => {
+  if (!summary) return null;
+  const statusIcon = (s) => {
+    if (s === 'valid') return <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />;
+    if (s === 'duplicate') return <AlertTriangle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />;
+    return <XCircle className="w-3.5 h-3.5 text-red-500 flex-shrink-0" />;
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <div>
+            <h3 className="text-base font-bold text-gray-900 truncate max-w-sm">{summary.fileName}</h3>
+            <p className="text-xs text-gray-400 mt-0.5">
+              {summary.totalRows} rows · {summary.valid} valid · {summary.duplicates} duplicates · {summary.invalid} invalid
+            </p>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+            <X className="w-4 h-4 text-gray-500" />
+          </button>
+        </div>
+        <div className="overflow-y-auto flex-1 px-6 py-4">
+          <table className="w-full text-xs">
+            <thead className="sticky top-0 bg-white">
+              <tr className="border-b border-gray-100">
+                <th className="text-left py-2 pr-3 text-gray-400 font-semibold uppercase tracking-wide w-12">Row</th>
+                <th className="text-left py-2 pr-3 text-gray-400 font-semibold uppercase tracking-wide">UUID</th>
+                <th className="text-left py-2 pr-3 text-gray-400 font-semibold uppercase tracking-wide w-20">Status</th>
+                <th className="text-left py-2 text-gray-400 font-semibold uppercase tracking-wide">Reason</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {summary.rows.map((row) => (
+                <tr key={row.rowNum} className={`
+                  ${row.status === 'valid' ? '' : row.status === 'duplicate' ? 'bg-amber-50/40' : 'bg-red-50/40'}
+                `}>
+                  <td className="py-2 pr-3 text-gray-400 font-mono">{row.rowNum}</td>
+                  <td className="py-2 pr-3 font-mono text-gray-700 break-all">{row.uuid}</td>
+                  <td className="py-2 pr-3">
+                    <span className="flex items-center gap-1">
+                      {statusIcon(row.status)}
+                      <span className={`capitalize font-medium ${
+                        row.status === 'valid' ? 'text-emerald-700' :
+                        row.status === 'duplicate' ? 'text-amber-700' : 'text-red-700'
+                      }`}>{row.status}</span>
+                    </span>
+                  </td>
+                  <td className="py-2 text-gray-500">{row.reason || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="px-6 py-4 border-t border-gray-100 flex justify-end">
+          <button onClick={onClose}
+            className="px-4 py-2 text-sm font-semibold text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const UUIDCSVUpload = ({ value = [], onChange, lcId = null }) => {
+  const [fileSummaries, setFileSummaries] = useState(value || []);
+  const [isDragging, setIsDragging] = useState(false);
+  const [processingFiles, setProcessingFiles] = useState(new Set());
+  const [viewingFile, setViewingFile] = useState(null);
+  const [saveValidation, setSaveValidation] = useState(null); // null | { errors, warnings }
+  const fileInputRef = useRef(null);
+
+  // Keep parent in sync
+  useEffect(() => {
+    onChange(fileSummaries);
+  }, [fileSummaries]);
+
+  // Recompute duplicates across all files whenever summaries change
+  const recomputeAll = useCallback((summaries) => {
+    const allPrev = new Set();
+    const recomputed = summaries.map((s) => {
+      const rawUuids = s.rows.map(r => r.uuid);
+      const newSummary = buildFileSummary(s.fileName, rawUuids, allPrev);
+      // Add valid UUIDs of this file to allPrev for next files
+      newSummary.validUuids.forEach(u => allPrev.add(u.toLowerCase()));
+      return newSummary;
+    });
+    return recomputed;
+  }, []);
+
+  const processFiles = async (files) => {
+    const validFiles = Array.from(files).filter(f =>
+      f.name.endsWith('.csv') || f.type === 'text/csv' || f.name.endsWith('.txt')
+    );
+    if (validFiles.length === 0) return;
+
+    const processingNames = new Set(validFiles.map(f => f.name));
+    setProcessingFiles(processingNames);
+
+    const newSummaries = await Promise.all(validFiles.map(async (file) => {
+      const text = await file.text();
+      const rawUuids = parseCSVUUIDs(text);
+      return { fileName: file.name, rows: rawUuids.map((uuid, i) => ({ rowNum: i + 1, uuid })) };
+    }));
+
+    setFileSummaries(prev => {
+      // Remove files with same name (replace)
+      const filtered = prev.filter(p => !validFiles.some(f => f.name === p.fileName));
+      const combined = [
+        ...filtered,
+        ...newSummaries.map(s => ({ fileName: s.fileName, rows: s.rows.map(r => ({ rowNum: r.rowNum, uuid: r.uuid })) }))
+      ];
+      // Now recompute all with full dedup
+      const allPrev = new Set();
+      return combined.map(s => {
+        const rawUuids = s.rows.map(r => r.uuid);
+        const summary = buildFileSummary(s.fileName, rawUuids, allPrev);
+        summary.validUuids.forEach(u => allPrev.add(u.toLowerCase()));
+        return summary;
+      });
+    });
+
+    setProcessingFiles(new Set());
+    setSaveValidation(null);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setIsDragging(false);
+    processFiles(e.dataTransfer.files);
+  };
+
+  const handleRemoveFile = (fileName) => {
+    setFileSummaries(prev => {
+      const updated = prev.filter(s => s.fileName !== fileName);
+      return recomputeAll(updated);
+    });
+    setSaveValidation(null);
+  };
+
+  // Validate before save — called externally by the form
+  const validateForSave = () => {
+    const errors = [];
+    const warnings = [];
+    fileSummaries.forEach(s => {
+      if (s.duplicates > 0) warnings.push(`"${s.fileName}": ${s.duplicates} duplicate UUID(s) will be skipped`);
+      if (s.invalid > 0) errors.push(`"${s.fileName}": ${s.invalid} row(s) have invalid UUID format`);
+    });
+    const result = { errors, warnings, hasErrors: errors.length > 0, hasWarnings: warnings.length > 0 };
+    setSaveValidation(result);
+    return result;
+  };
+
+  // Expose validateForSave via ref-like pattern using a callback on the onChange
+  // We'll store it on the component instance via a hidden prop trick
+  useEffect(() => {
+    // Store validate function reference so parent can call it
+    if (onChange._setValidator) onChange._setValidator(validateForSave);
+  }, [fileSummaries]);
+
+  // Totals
+  const totals = fileSummaries.reduce((acc, s) => ({
+    files: acc.files + 1,
+    rows: acc.rows + s.totalRows,
+    valid: acc.valid + s.valid,
+    duplicates: acc.duplicates + s.duplicates,
+    invalid: acc.invalid + (s.invalid || 0),
+  }), { files: 0, rows: 0, valid: 0, duplicates: 0, invalid: 0 });
+
+  const statusColor = (fileStatus) => {
+    if (fileStatus === 'ok') return 'border-emerald-200 bg-emerald-50/30';
+    if (fileStatus === 'warning') return 'border-amber-200 bg-amber-50/30';
+    return 'border-red-200 bg-red-50/30';
+  };
+
+  const statusBadge = (fileStatus, valid, total, dup, inv) => {
+    if (fileStatus === 'ok') return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold bg-emerald-100 text-emerald-700 rounded-full">
+        <CheckCircle2 className="w-3 h-3" /> All Valid
+      </span>
+    );
+    if (fileStatus === 'warning') return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold bg-amber-100 text-amber-700 rounded-full">
+        <AlertTriangle className="w-3 h-3" /> {dup} Duplicate{dup !== 1 ? 's' : ''}
+      </span>
+    );
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold bg-red-100 text-red-700 rounded-full">
+        <XCircle className="w-3 h-3" /> {inv > 0 ? `${inv} Invalid` : `${dup} Dup`}
+      </span>
+    );
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Drop Zone */}
+      <div
+        onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+        onDragLeave={() => setIsDragging(false)}
+        onDrop={handleDrop}
+        className={`relative border-2 border-dashed rounded-xl p-6 text-center transition-all cursor-pointer
+          ${isDragging ? 'border-blue-400 bg-blue-50' : 'border-gray-300 hover:border-blue-300 hover:bg-gray-50/50'}`}
+        onClick={() => fileInputRef.current?.click()}
+      >
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".csv,.txt"
+          multiple
+          className="hidden"
+          onChange={(e) => processFiles(e.target.files)}
+        />
+        {processingFiles.size > 0 ? (
+          <div className="flex flex-col items-center gap-2">
+            <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+            <p className="text-sm font-medium text-blue-700">Processing {processingFiles.size} file(s)…</p>
+          </div>
+        ) : (
+          <>
+            <FileSpreadsheet className="w-10 h-10 text-gray-300 mx-auto mb-3" />
+            <p className="text-sm font-semibold text-gray-700">Drop CSV files here or click to browse</p>
+            <p className="text-xs text-gray-400 mt-1">
+              Supports .csv and .txt · One UUID per row (first column) · Multiple files allowed
+            </p>
+          </>
+        )}
+      </div>
+
+      {/* Per-file summaries */}
+      {fileSummaries.length > 0 && (
+        <div className="space-y-2">
+          {/* Table header */}
+          <div className="grid grid-cols-12 gap-2 px-3 py-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wide">
+            <div className="col-span-4">File Name</div>
+            <div className="col-span-1 text-right">Rows</div>
+            <div className="col-span-1 text-right">Valid</div>
+            <div className="col-span-1 text-right">Dup</div>
+            <div className="col-span-1 text-right">Invalid</div>
+            <div className="col-span-2">Status</div>
+            <div className="col-span-2 text-right">Actions</div>
+          </div>
+
+          {fileSummaries.map((s) => (
+            <div key={s.fileName}
+              className={`grid grid-cols-12 gap-2 items-center px-3 py-3 rounded-xl border transition-all ${statusColor(s.fileStatus)}`}>
+              <div className="col-span-4 flex items-center gap-2 min-w-0">
+                <FileSpreadsheet className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                <span className="text-sm font-medium text-gray-900 truncate" title={s.fileName}>{s.fileName}</span>
+              </div>
+              <div className="col-span-1 text-right text-sm font-mono text-gray-700">{s.totalRows}</div>
+              <div className="col-span-1 text-right text-sm font-mono text-emerald-700 font-semibold">{s.valid}</div>
+              <div className={`col-span-1 text-right text-sm font-mono font-semibold ${s.duplicates > 0 ? 'text-amber-600' : 'text-gray-300'}`}>
+                {s.duplicates}
+              </div>
+              <div className={`col-span-1 text-right text-sm font-mono font-semibold ${(s.invalid || 0) > 0 ? 'text-red-600' : 'text-gray-300'}`}>
+                {s.invalid || 0}
+              </div>
+              <div className="col-span-2">
+                {statusBadge(s.fileStatus, s.valid, s.totalRows, s.duplicates, s.invalid || 0)}
+              </div>
+              <div className="col-span-2 flex items-center gap-1.5 justify-end">
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setViewingFile(s); }}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-blue-700 border border-blue-200 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors"
+                >
+                  <Eye className="w-3 h-3" /> View
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); handleRemoveFile(s.fileName); }}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-red-600 border border-red-200 bg-red-50 rounded-lg hover:bg-red-100 transition-colors"
+                >
+                  <Trash2 className="w-3 h-3" /> Remove
+                </button>
+              </div>
+            </div>
+          ))}
+
+          {/* Overall summary strip */}
+          <div className="grid grid-cols-4 gap-3 mt-3">
+            {[
+              { label: 'Total Files', value: totals.files, color: 'text-gray-900', bg: 'bg-gray-50 border-gray-200' },
+              { label: 'Total Rows', value: totals.rows, color: 'text-gray-900', bg: 'bg-gray-50 border-gray-200' },
+              { label: 'Valid UUID', value: totals.valid, color: 'text-emerald-700', bg: 'bg-emerald-50 border-emerald-200' },
+              { label: 'Duplicate', value: totals.duplicates + (totals.invalid || 0), color: totals.duplicates + (totals.invalid || 0) > 0 ? 'text-amber-700' : 'text-gray-400', bg: totals.duplicates + (totals.invalid || 0) > 0 ? 'bg-amber-50 border-amber-200' : 'bg-gray-50 border-gray-200' },
+            ].map(item => (
+              <div key={item.label} className={`${item.bg} border rounded-xl px-4 py-3 text-center`}>
+                <p className={`text-2xl font-bold ${item.color}`}>{item.value}</p>
+                <p className="text-xs text-gray-500 mt-0.5">{item.label}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Save-time validation messages */}
+      {saveValidation && (saveValidation.hasErrors || saveValidation.hasWarnings) && (
+        <div className="space-y-2">
+          {saveValidation.errors.map((err, i) => (
+            <div key={i} className="flex items-start gap-2 px-4 py-3 bg-red-50 border border-red-200 rounded-xl">
+              <XCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-red-800">{err}</p>
+            </div>
+          ))}
+          {saveValidation.warnings.map((w, i) => (
+            <div key={i} className="flex items-start gap-2 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl">
+              <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-amber-800">{w}</p>
+            </div>
+          ))}
+          {!saveValidation.hasErrors && saveValidation.hasWarnings && (
+            <div className="flex items-start gap-2 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl">
+              <Info className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-blue-800">
+                Only <strong>valid, non-duplicate UUIDs</strong> ({totals.valid}) will be saved. Duplicates and invalid rows will be ignored.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* View modal */}
+      {viewingFile && <RowDetailModal summary={viewingFile} onClose={() => setViewingFile(null)} />}
+    </div>
+  );
+};
+
+// ── Main LCForm Component ─────────────────────────────────────────────────────
 
 const LCForm = ({ lc, onSave, onBack }) => {
   const isEditMode = !!(lc && lc.id);
+  const uuidValidatorRef = useRef(null);
 
   const [formData, setFormData] = useState({
     lc_number: '',
@@ -15,25 +413,20 @@ const LCForm = ({ lc, onSave, onBack }) => {
     lc_currency: 'USD',
     lc_value_bdt: '',
     exchange_rate: '',
-    
     pi_number: '',
     pi_date: '',
-    
     insurance_bill_amount: '',
     cover_note_number: '',
     insurance_issue_date: '',
     insurance_company_name: '',
-    
     quantity: '',
     item_description: '',
-    
-    status: 'Active', 
-    files: {
-      lc_doc: null,
-      pi_doc: null,
-      insurance_doc: null
-    }
+    status: 'Active',
+    files: { lc_doc: null, pi_doc: null, insurance_doc: null }
   });
+
+  const [uuidFiles, setUuidFiles] = useState(lc?.uuid_files || []);
+  const [uuidSaveError, setUuidSaveError] = useState(null);
 
   useEffect(() => {
     if (isEditMode && lc) {
@@ -55,8 +448,9 @@ const LCForm = ({ lc, onSave, onBack }) => {
         quantity: lc.quantity || '',
         item_description: lc.item_description || '',
         status: lc.status || 'Active',
-        files: { lc_doc: null, pi_doc: null, insurance_doc: null } 
+        files: { lc_doc: null, pi_doc: null, insurance_doc: null }
       }));
+      if (lc.uuid_files) setUuidFiles(lc.uuid_files);
     }
   }, [lc, isEditMode]);
 
@@ -72,62 +466,67 @@ const LCForm = ({ lc, onSave, onBack }) => {
     }));
   };
 
-  // const handleSubmit = (e) => {
-  //   e.preventDefault();
-    
-  //   // Prepare data for saving
-  //   const lcData = {
-  //     ...formData,
-  //     // Convert string numbers to actual numbers
-  //     lc_value_foreign: parseFloat(formData.lc_value_foreign) || 0,
-  //     lc_value_bdt: parseFloat(formData.lc_value_bdt) || 0,
-  //     exchange_rate: parseFloat(formData.exchange_rate) || 0,
-  //     insurance_bill_amount: parseFloat(formData.insurance_bill_amount) || 0,
-  //     quantity: parseInt(formData.quantity) || 0,
-  //     // Keep file references
-  //     lc_doc: formData.files.lc_doc?.name || null,
-  //     pi_doc: formData.files.pi_doc?.name || null,
-  //     insurance_doc: formData.files.insurance_doc?.name || null,
-  //     // Add shipments array if creating new LC
-  //     ...(!isEditMode && { shipments: [] })
-  //   };
-    
-  //   // Remove the files object from the data (we've already extracted file names)
-  //   delete lcData.files;
-    
-  //   onSave(lcData);
-  // };
-  const handleSubmit = (e) => {
-  e.preventDefault();
-  
-  const lcData = {
-    lc_number: formData.lc_number,
-    lc_issue_date: formData.lc_issue_date,
-    bank_name: formData.bank_name,
-    lc_value_foreign: parseFloat(formData.lc_value_foreign) || 0,
-    lc_currency: formData.lc_currency,
-    lc_value_bdt: parseFloat(formData.lc_value_bdt) || 0,
-    exchange_rate: parseFloat(formData.exchange_rate) || 0,
-    pi_number: formData.pi_number,
-    pi_date: formData.pi_date,
-    insurance_company_name: formData.insurance_company_name,
-    cover_note_number: formData.cover_note_number,
-    insurance_bill_amount: parseFloat(formData.insurance_bill_amount) || 0,
-    insurance_issue_date: formData.insurance_issue_date,
-    quantity: parseInt(formData.quantity) || 0,
-    item_description: formData.item_description,
-    status: formData.status || 'Active',
-    lc_doc: formData.files.lc_doc?.name || null,
-    pi_doc: formData.files.pi_doc?.name || null,
-    insurance_doc: formData.files.insurance_doc?.name || null,
+  // UUID files change handler with validator injection
+  const handleUuidFilesChange = (summaries) => {
+    setUuidFiles(summaries);
+    setUuidSaveError(null);
   };
-  
-  onSave(lcData);  // THIS LINE IS CRITICAL
-};
+  // Inject validator reference into the onChange object (hack-free pattern)
+  handleUuidFilesChange._setValidator = (fn) => { uuidValidatorRef.current = fn; };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+
+    // Run UUID save-time validation
+    if (uuidValidatorRef.current) {
+      const result = uuidValidatorRef.current();
+      if (result.hasErrors) {
+        setUuidSaveError('Please fix UUID validation errors before saving.');
+        return;
+      }
+    }
+
+    // Collect only valid UUIDs across all files
+    const allValidUuids = uuidFiles.flatMap(s => s.validUuids || []);
+
+    const lcData = {
+      lc_number: formData.lc_number,
+      lc_issue_date: formData.lc_issue_date,
+      bank_name: formData.bank_name,
+      lc_value_foreign: parseFloat(formData.lc_value_foreign) || 0,
+      lc_currency: formData.lc_currency,
+      lc_value_bdt: parseFloat(formData.lc_value_bdt) || 0,
+      exchange_rate: parseFloat(formData.exchange_rate) || 0,
+      pi_number: formData.pi_number,
+      pi_date: formData.pi_date,
+      insurance_company_name: formData.insurance_company_name,
+      cover_note_number: formData.cover_note_number,
+      insurance_bill_amount: parseFloat(formData.insurance_bill_amount) || 0,
+      insurance_issue_date: formData.insurance_issue_date,
+      quantity: parseInt(formData.quantity) || 0,
+      item_description: formData.item_description,
+      status: formData.status || 'Active',
+      lc_doc: formData.files.lc_doc?.name || null,
+      pi_doc: formData.files.pi_doc?.name || null,
+      insurance_doc: formData.files.insurance_doc?.name || null,
+      uuid_files: uuidFiles,         // full file summaries
+      chip_uuids: allValidUuids,     // flat list of valid UUIDs
+    };
+
+    onSave(lcData);
+  };
+
+  // Totals for the UUID section summary
+  const uuidTotals = uuidFiles.reduce((acc, s) => ({
+    files: acc.files + 1,
+    rows: acc.rows + (s.totalRows || 0),
+    valid: acc.valid + (s.valid || 0),
+    duplicates: acc.duplicates + (s.duplicates || 0),
+  }), { files: 0, rows: 0, valid: 0, duplicates: 0 });
 
   return (
     <div className="space-y-6">
-      {/* Header - Matches other pages */}
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           <button onClick={onBack} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
@@ -142,11 +541,9 @@ const LCForm = ({ lc, onSave, onBack }) => {
             </p>
           </div>
         </div>
-        
-        {/* Status Badge */}
-        <select 
-          name="status" 
-          value={formData.status} 
+        <select
+          name="status"
+          value={formData.status}
           onChange={handleInputChange}
           className={`px-4 py-2 text-sm font-medium rounded-lg border-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer ${
             formData.status === 'Active' ? 'bg-green-50 text-green-800 border-green-200' :
@@ -161,7 +558,7 @@ const LCForm = ({ lc, onSave, onBack }) => {
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
-        
+
         {/* LC Details */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200">
           <div className="px-6 py-4 border-b border-gray-200">
@@ -173,56 +570,26 @@ const LCForm = ({ lc, onSave, onBack }) => {
           <div className="p-6">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  LC Number <span className="text-red-500">*</span>
-                </label>
-                <input 
-                  type="text" 
-                  name="lc_number" 
-                  value={formData.lc_number} 
-                  onChange={handleInputChange} 
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" 
-                  placeholder="e.g. LC-2024-001" 
-                  required 
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  LC Issue Date <span className="text-red-500">*</span>
-                </label>
-                <input 
-                  type="date" 
-                  name="lc_issue_date" 
-                  value={formData.lc_issue_date} 
-                  onChange={handleInputChange} 
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" 
-                  required 
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Bank Name <span className="text-red-500">*</span>
-                </label>
-                <input 
-                  type="text" 
-                  name="bank_name" 
-                  value={formData.bank_name} 
-                  onChange={handleInputChange} 
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" 
-                  placeholder="e.g. HSBC Bangladesh" 
-                  required 
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  LC Currency <span className="text-red-500">*</span>
-                </label>
-                <select 
-                  name="lc_currency" 
-                  value={formData.lc_currency} 
-                  onChange={handleInputChange} 
+                <label className="block text-sm font-medium text-gray-700 mb-2">LC Number <span className="text-red-500">*</span></label>
+                <input type="text" name="lc_number" value={formData.lc_number} onChange={handleInputChange}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
+                  placeholder="e.g. LC-2024-001" required />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">LC Issue Date <span className="text-red-500">*</span></label>
+                <input type="date" name="lc_issue_date" value={formData.lc_issue_date} onChange={handleInputChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" required />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Bank Name <span className="text-red-500">*</span></label>
+                <input type="text" name="bank_name" value={formData.bank_name} onChange={handleInputChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="e.g. HSBC Bangladesh" required />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">LC Currency <span className="text-red-500">*</span></label>
+                <select name="lc_currency" value={formData.lc_currency} onChange={handleInputChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
                   <option value="USD">USD</option>
                   <option value="EUR">EUR</option>
                   <option value="GBP">GBP</option>
@@ -230,53 +597,27 @@ const LCForm = ({ lc, onSave, onBack }) => {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  LC Value (Foreign) <span className="text-red-500">*</span>
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">LC Value (Foreign) <span className="text-red-500">*</span></label>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
-                  <input 
-                    type="number" 
-                    name="lc_value_foreign" 
-                    value={formData.lc_value_foreign} 
-                    onChange={handleInputChange} 
-                    className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" 
-                    placeholder="0.00" 
-                    step="0.01"
-                    required 
-                  />
+                  <input type="number" name="lc_value_foreign" value={formData.lc_value_foreign} onChange={handleInputChange}
+                    className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="0.00" step="0.01" required />
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Exchange Rate
-                </label>
-                <input 
-                  type="number" 
-                  name="exchange_rate" 
-                  value={formData.exchange_rate} 
-                  onChange={handleInputChange} 
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" 
-                  placeholder="0.00" 
-                  step="0.01"
-                />
+                <label className="block text-sm font-medium text-gray-700 mb-2">Exchange Rate</label>
+                <input type="number" name="exchange_rate" value={formData.exchange_rate} onChange={handleInputChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="0.00" step="0.01" />
               </div>
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  LC Value (BDT) <span className="text-red-500">*</span>
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">LC Value (BDT) <span className="text-red-500">*</span></label>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">৳</span>
-                  <input 
-                    type="number" 
-                    name="lc_value_bdt" 
-                    value={formData.lc_value_bdt} 
-                    onChange={handleInputChange} 
-                    className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-gray-50" 
-                    placeholder="0.00" 
-                    step="0.01"
-                    required 
-                  />
+                  <input type="number" name="lc_value_bdt" value={formData.lc_value_bdt} onChange={handleInputChange}
+                    className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-gray-50"
+                    placeholder="0.00" step="0.01" required />
                 </div>
               </div>
             </div>
@@ -295,24 +636,14 @@ const LCForm = ({ lc, onSave, onBack }) => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">PI Number</label>
-                <input 
-                  type="text" 
-                  name="pi_number" 
-                  value={formData.pi_number} 
-                  onChange={handleInputChange} 
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" 
-                  placeholder="e.g. PI-2024-001"
-                />
+                <input type="text" name="pi_number" value={formData.pi_number} onChange={handleInputChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="e.g. PI-2024-001" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">PI Date</label>
-                <input 
-                  type="date" 
-                  name="pi_date" 
-                  value={formData.pi_date} 
-                  onChange={handleInputChange} 
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" 
-                />
+                <input type="date" name="pi_date" value={formData.pi_date} onChange={handleInputChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
               </div>
             </div>
           </div>
@@ -330,50 +661,29 @@ const LCForm = ({ lc, onSave, onBack }) => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Insurance Company Name</label>
-                <input 
-                  type="text" 
-                  name="insurance_company_name" 
-                  value={formData.insurance_company_name} 
-                  onChange={handleInputChange} 
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" 
-                  placeholder="e.g. Sadharan Bima Corporation"
-                />
+                <input type="text" name="insurance_company_name" value={formData.insurance_company_name} onChange={handleInputChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="e.g. Sadharan Bima Corporation" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Cover Note Number</label>
-                <input 
-                  type="text" 
-                  name="cover_note_number" 
-                  value={formData.cover_note_number} 
-                  onChange={handleInputChange} 
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" 
-                  placeholder="e.g. CN-2024-001"
-                />
+                <input type="text" name="cover_note_number" value={formData.cover_note_number} onChange={handleInputChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="e.g. CN-2024-001" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Insurance Bill Amount</label>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">৳</span>
-                  <input 
-                    type="number" 
-                    name="insurance_bill_amount" 
-                    value={formData.insurance_bill_amount} 
-                    onChange={handleInputChange} 
-                    className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" 
-                    placeholder="0.00"
-                    step="0.01"
-                  />
+                  <input type="number" name="insurance_bill_amount" value={formData.insurance_bill_amount} onChange={handleInputChange}
+                    className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="0.00" step="0.01" />
                 </div>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Insurance Issue Date</label>
-                <input 
-                  type="date" 
-                  name="insurance_issue_date" 
-                  value={formData.insurance_issue_date} 
-                  onChange={handleInputChange} 
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" 
-                />
+                <input type="date" name="insurance_issue_date" value={formData.insurance_issue_date} onChange={handleInputChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
               </div>
             </div>
           </div>
@@ -390,32 +700,17 @@ const LCForm = ({ lc, onSave, onBack }) => {
           <div className="p-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Quantity <span className="text-red-500">*</span>
-                </label>
-                <input 
-                  type="number" 
-                  name="quantity" 
-                  value={formData.quantity} 
-                  onChange={handleInputChange} 
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" 
-                  placeholder="0"
-                  required 
-                />
+                <label className="block text-sm font-medium text-gray-700 mb-2">Quantity <span className="text-red-500">*</span></label>
+                <input type="number" name="quantity" value={formData.quantity} onChange={handleInputChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="0" required />
               </div>
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Item Description <span className="text-red-500">*</span>
-                </label>
-                <textarea 
-                  name="item_description" 
-                  value={formData.item_description} 
-                  onChange={handleInputChange} 
-                  rows="3" 
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none" 
-                  placeholder="Enter detailed description of goods..."
-                  required
-                ></textarea>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Item Description <span className="text-red-500">*</span></label>
+                <textarea name="item_description" value={formData.item_description} onChange={handleInputChange}
+                  rows="3"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                  placeholder="Enter detailed description of goods..." required></textarea>
               </div>
             </div>
           </div>
@@ -433,74 +728,86 @@ const LCForm = ({ lc, onSave, onBack }) => {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {/* LC Document */}
               <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-400 hover:bg-blue-50 transition-all cursor-pointer">
-                <input 
-                  type="file" 
-                  id="lc_doc" 
-                  className="hidden" 
-                  onChange={(e) => handleFileChange('lc_doc', e.target.files[0])} 
-                  accept=".pdf,.jpg,.jpeg,.png"
-                />
+                <input type="file" id="lc_doc" className="hidden"
+                  onChange={(e) => handleFileChange('lc_doc', e.target.files[0])} accept=".pdf,.jpg,.jpeg,.png" />
                 <label htmlFor="lc_doc" className="cursor-pointer">
                   <FileText className="w-10 h-10 text-gray-400 mb-3 mx-auto" />
                   <p className="text-sm font-medium text-gray-900 mb-1">LC Document</p>
-                  <p className="text-xs text-gray-500">
-                    {formData.files.lc_doc ? formData.files.lc_doc.name : 'Click to upload PDF/Image'}
-                  </p>
+                  <p className="text-xs text-gray-500">{formData.files.lc_doc ? formData.files.lc_doc.name : 'Click to upload PDF/Image'}</p>
                 </label>
               </div>
-
               {/* PI Document */}
               <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-purple-400 hover:bg-purple-50 transition-all cursor-pointer">
-                <input 
-                  type="file" 
-                  id="pi_doc" 
-                  className="hidden" 
-                  onChange={(e) => handleFileChange('pi_doc', e.target.files[0])} 
-                  accept=".pdf,.jpg,.jpeg,.png"
-                />
+                <input type="file" id="pi_doc" className="hidden"
+                  onChange={(e) => handleFileChange('pi_doc', e.target.files[0])} accept=".pdf,.jpg,.jpeg,.png" />
                 <label htmlFor="pi_doc" className="cursor-pointer">
                   <DollarSign className="w-10 h-10 text-gray-400 mb-3 mx-auto" />
                   <p className="text-sm font-medium text-gray-900 mb-1">PI Document</p>
-                  <p className="text-xs text-gray-500">
-                    {formData.files.pi_doc ? formData.files.pi_doc.name : 'Click to upload PDF/Image'}
-                  </p>
+                  <p className="text-xs text-gray-500">{formData.files.pi_doc ? formData.files.pi_doc.name : 'Click to upload PDF/Image'}</p>
                 </label>
               </div>
-
               {/* Insurance Document */}
               <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-green-400 hover:bg-green-50 transition-all cursor-pointer">
-                <input 
-                  type="file" 
-                  id="insurance_doc" 
-                  className="hidden" 
-                  onChange={(e) => handleFileChange('insurance_doc', e.target.files[0])} 
-                  accept=".pdf,.jpg,.jpeg,.png"
-                />
+                <input type="file" id="insurance_doc" className="hidden"
+                  onChange={(e) => handleFileChange('insurance_doc', e.target.files[0])} accept=".pdf,.jpg,.jpeg,.png" />
                 <label htmlFor="insurance_doc" className="cursor-pointer">
                   <Shield className="w-10 h-10 text-gray-400 mb-3 mx-auto" />
                   <p className="text-sm font-medium text-gray-900 mb-1">Insurance & Bill</p>
-                  <p className="text-xs text-gray-500">
-                    {formData.files.insurance_doc ? formData.files.insurance_doc.name : 'Click to upload PDF/Image'}
-                  </p>
+                  <p className="text-xs text-gray-500">{formData.files.insurance_doc ? formData.files.insurance_doc.name : 'Click to upload PDF/Image'}</p>
                 </label>
               </div>
             </div>
           </div>
         </div>
 
+        {/* ── Chip UUID CSV Upload ── */}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+          <div className="px-6 py-4 border-b border-gray-200">
+            <div className="flex items-center gap-2">
+              <Hash className="w-5 h-5 text-violet-600" />
+              <h2 className="text-lg font-semibold text-gray-900">Chip UUID CSV Upload</h2>
+              <span className="ml-1 px-2 py-0.5 text-xs font-semibold bg-violet-100 text-violet-700 rounded-full">Optional</span>
+            </div>
+            <p className="text-sm text-gray-500 mt-1 ml-7">
+              Upload one or more CSV files containing Chip UUIDs. Each file should have one UUID per row in the first column.
+              Duplicates and invalid UUIDs are detected at upload time and at save time.
+            </p>
+          </div>
+          <div className="p-6">
+            <UUIDCSVUpload
+              value={uuidFiles}
+              onChange={handleUuidFilesChange}
+              lcId={lc?.id}
+            />
+
+            {uuidSaveError && (
+              <div className="mt-4 flex items-start gap-2 px-4 py-3 bg-red-50 border border-red-200 rounded-xl">
+                <XCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+                <p className="text-sm text-red-800 font-medium">{uuidSaveError}</p>
+              </div>
+            )}
+
+            {uuidFiles.length > 0 && (
+              <div className="mt-4 flex items-start gap-2 px-4 py-3 bg-violet-50 border border-violet-200 rounded-xl">
+                <Info className="w-4 h-4 text-violet-500 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-violet-800">
+                  <strong>{uuidFiles.reduce((s, f) => s + (f.valid || 0), 0)} valid UUIDs</strong> from{' '}
+                  {uuidFiles.length} file(s) will be saved with this LC.
+                  Duplicates and invalid rows are excluded automatically.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+
         {/* Action Buttons */}
         <div className="flex items-center justify-between bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <button 
-            type="button" 
-            onClick={onBack} 
-            className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium"
-          >
+          <button type="button" onClick={onBack}
+            className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium">
             Cancel
           </button>
-          <button 
-            type="submit" 
-            className="flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium shadow-sm"
-          >
+          <button type="submit"
+            className="flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium shadow-sm">
             <Save className="w-4 h-4" />
             {isEditMode ? 'Update LC' : 'Create LC'}
           </button>
