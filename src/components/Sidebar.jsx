@@ -3,7 +3,7 @@ import {
   LayoutDashboard, FileText, Ship, Package, Warehouse, BarChart3,
   Factory, Users, Calendar, DollarSign, ChevronDown, ChevronRight,
   Box, Layers, ClipboardList, Receipt, TrendingUp, FileSpreadsheet,
-  User, LogOut, Menu, Inbox, Activity, Bell, Settings, Lock, UserCircle
+  User, LogOut, Menu, Inbox, Activity, Bell, Settings, Lock, UserCircle,Truck
 } from 'lucide-react';
 
 const Sidebar = ({ currentView, setCurrentView, children }) => {
@@ -28,12 +28,12 @@ const Sidebar = ({ currentView, setCurrentView, children }) => {
   };
 
   const menuItems = [
-    // {
-    //   id: 'dashboard',
-    //   label: 'Dashboard',
-    //   icon: LayoutDashboard,
-    //   view: 'dashboard'
-    // },
+    {
+      id: 'dashboard',
+      label: 'Dashboard',
+      icon: LayoutDashboard,
+      view: 'dashboard'
+    },
     {
       id: 'procurement',
       label: 'Procurement',
@@ -56,7 +56,8 @@ const Sidebar = ({ currentView, setCurrentView, children }) => {
         { id: 'inbound-list', label: 'Inbound Materials', icon: Inbox, view: 'inbound-list' },
         { id: 'box-list', label: 'Material Boxes', icon: Box, view: 'box-list' },
         { id: 'production', label: 'Production Tracking', icon: Activity, view: 'production' },
-        { id: 'subbox-list', label: 'Finished Goods', icon: Layers, view: 'subbox-list' }
+        { id: 'subbox-list', label: 'Finished Goods', icon: Layers, view: 'subbox-list' },
+        { id: 'delivered-goods',   label: 'Delivered Goods',   icon: Truck,   view: 'delivered-goods'   },
       ]
     },
     // {

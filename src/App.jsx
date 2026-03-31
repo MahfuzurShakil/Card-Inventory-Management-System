@@ -41,6 +41,10 @@ import ShiftRosterList from './views/ShiftRosterList';
 import LandingCost from './views/LandingCost';
 
 
+import DeliveredGoods from './views/Deliveredgoods';
+import ChallanDetail  from './views/Challandetail';
+
+
 // INITIAL MOCK DATA WITH COMPLETED SHIPMENT FOR TESTING
 const INITIAL_LCS = [
   {
@@ -331,6 +335,8 @@ const [rosterContext, setRosterContext] = useState(null);
 const [selectedSubBoxIdsForChallan, setSelectedSubBoxIdsForChallan] = useState([]);
 
 const [financeData, setFinanceData] = useState({});
+
+const [selectedChallan, setSelectedChallan] = useState(null);
   
   const navigate = (view, lc = null, material = null, employee = null, box = null, subBox = null, context = null) => {
     setCurrentView(view);
@@ -786,6 +792,12 @@ const handleDeleteLocalCost = (costId) => {
   }
 };
 
+const handleDispatchChallan = (subBoxIds, challanPatch) => {
+  setSubBoxes(prev => prev.map(sb =>
+    subBoxIds.includes(sb.id) ? { ...sb, ...challanPatch } : sb
+  ));
+};
+
 const handlePaymentSave = (finKey, payments) => {
   setFinanceData(prev => ({ ...prev, [finKey]: payments }));
 };
@@ -800,6 +812,7 @@ const handlePaymentSave = (finKey, payments) => {
             inboundMaterials={inboundMaterials}
             boxes={boxes}
             subBoxes={subBoxes}
+            localCosts={localCosts}  
             productionAssignments={productionAssignments}
             onNavigate={navigate}
             onSelectLC={(lc) => navigate('lc-detail', lc)}
@@ -1070,6 +1083,7 @@ case 'shift-assignment':
       subBoxes={subBoxes}
       preSelectedIds={selectedSubBoxIdsForChallan}
       onBack={() => navigate('subbox-list')}
+      onDispatch={handleDispatchChallan}
     />
   );
 
@@ -1195,6 +1209,25 @@ case 'profitability':
       onNavigate={navigate}
     />
   );
+
+  case 'delivered-goods':
+  return (
+    <DeliveredGoods
+      subBoxes={subBoxes}
+      onViewChallan={(challan) => {
+        setSelectedChallan(challan);
+        navigate('challan-detail');
+      }}
+    />
+  );
+
+case 'challan-detail':
+  return selectedChallan ? (
+    <ChallanDetail
+      challan={selectedChallan}
+      onBack={() => navigate('delivered-goods')}
+    />
+  ) : null;
 
 
       default:
