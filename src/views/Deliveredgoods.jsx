@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import {
   Truck, Search, Eye, Download, FileText, Package,
-  Calendar, User, ChevronLeft, ChevronRight, CheckCircle,
+  Calendar, User, ChevronLeft, ChevronRight,
   Layers, X
 } from 'lucide-react';
 import { openChallanPrint } from '../utils/challanPrint';
@@ -42,12 +42,6 @@ function buildChallans(subBoxes) {
   });
 }
 
-function itemBreakdown(boxes) {
-  const good = boxes.filter(b => b.output_type === 'Good/ QC Approved').length;
-  const wastage = boxes.filter(b => b.output_type !== 'Good/ QC Approved').length;
-  return { good, wastage };
-}
-
 const DeliveredGoods = ({ subBoxes = [], onViewChallan }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [dateFilter, setDateFilter] = useState('');
@@ -74,10 +68,7 @@ const DeliveredGoods = ({ subBoxes = [], onViewChallan }) => {
     (sum, challan) => sum + challan.boxes.reduce((inner, box) => inner + (box.quantity || 0), 0),
     0
   );
-  const totalGood = challans.reduce(
-    (sum, challan) => sum + challan.boxes.filter(box => box.output_type === 'Good/ QC Approved').length,
-    0
-  );
+  const averageBoxesPerChallan = challans.length > 0 ? (totalBoxes / challans.length).toFixed(1) : '0.0';
 
   const handleClearFilters = () => {
     setSearchTerm('');
@@ -139,12 +130,12 @@ const DeliveredGoods = ({ subBoxes = [], onViewChallan }) => {
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-xs font-medium text-gray-500">QC Approved Boxes</p>
-              <p className="text-2xl font-bold text-emerald-700 mt-1">{totalGood.toLocaleString()}</p>
-              <p className="text-xs text-gray-400 mt-0.5">good output</p>
+              <p className="text-xs font-medium text-gray-500">Avg. Boxes / Challan</p>
+              <p className="text-2xl font-bold text-gray-900 mt-1">{averageBoxesPerChallan}</p>
+              <p className="text-xs text-gray-400 mt-0.5">per dispatched challan</p>
             </div>
-            <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
-              <CheckCircle className="w-5 h-5 text-green-600" />
+            <div className="w-10 h-10 bg-amber-100 rounded-lg flex items-center justify-center">
+              <Package className="w-5 h-5 text-amber-600" />
             </div>
           </div>
         </div>
@@ -193,7 +184,7 @@ const DeliveredGoods = ({ subBoxes = [], onViewChallan }) => {
                 <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Challan No.</th>
                 <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Date</th>
                 <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider text-right">No. of Boxes</th>
-                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Item Summary</th>
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider text-right">Total Quantity</th>
                 <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Prepared By</th>
                 <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Action</th>
               </tr>
@@ -201,7 +192,6 @@ const DeliveredGoods = ({ subBoxes = [], onViewChallan }) => {
             <tbody className="divide-y divide-gray-200">
               {pageRows.length > 0 ? pageRows.map(challan => {
                 const totalQty = challan.boxes.reduce((sum, box) => sum + (box.quantity || 0), 0);
-                const { good, wastage } = itemBreakdown(challan.boxes);
 
                 return (
                   <tr key={challan.challan_no} className="hover:bg-gray-50 transition-colors">
@@ -222,26 +212,11 @@ const DeliveredGoods = ({ subBoxes = [], onViewChallan }) => {
                     </td>
 
                     <td className="px-6 py-4 text-right">
-                      <div>
-                        <span className="font-semibold text-gray-900">{challan.boxes.length}</span>
-                        <span className="text-xs text-gray-400 ml-1">boxes</span>
-                        <p className="text-xs text-gray-500 mt-0.5">{totalQty.toLocaleString()} units</p>
-                      </div>
+                      <span className="font-semibold text-gray-900">{challan.boxes.length}</span>
                     </td>
 
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        {good > 0 && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-700">
-                            <CheckCircle className="w-3 h-3" /> QC {good}
-                          </span>
-                        )}
-                        {wastage > 0 && (
-                          <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-red-100 text-red-700">
-                            Waste {wastage}
-                          </span>
-                        )}
-                      </div>
+                    <td className="px-6 py-4 text-right font-semibold text-gray-900">
+                      {totalQty.toLocaleString()}
                     </td>
 
                     <td className="px-6 py-4">
@@ -263,7 +238,7 @@ const DeliveredGoods = ({ subBoxes = [], onViewChallan }) => {
                           onClick={() => openChallanPrint(challan, challan.boxes)}
                           className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors"
                         >
-                          <Download className="w-3.5 h-3.5" /> Challan
+                          <Download className="w-3.5 h-3.5" /> Details
                         </button>
                       </div>
                     </td>

@@ -28,12 +28,12 @@ const Sidebar = ({ currentView, setCurrentView, children }) => {
   };
 
   const menuItems = [
-    {
-      id: 'dashboard',
-      label: 'Dashboard',
-      icon: LayoutDashboard,
-      view: 'dashboard'
-    },
+    // {
+    //   id: 'dashboard',
+    //   label: 'Dashboard',
+    //   icon: LayoutDashboard,
+    //   view: 'dashboard'
+    // },
     {
       id: 'procurement',
       label: 'Procurement',

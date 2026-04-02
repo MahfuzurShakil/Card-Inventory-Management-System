@@ -435,14 +435,26 @@ const [selectedChallan, setSelectedChallan] = useState(null);
   };
 
   // Handle Save LC
-  const handleSaveLC = (lcData) => {
+  const handleSaveLC = (lcData, options = {}) => {
+    let savedLC;
+
     if (lcData.id) {
+      savedLC = lcData;
       setLcs(lcs.map(lc => lc.id === lcData.id ? lcData : lc));
     } else {
-      const newLC = { ...lcData, id: Date.now(), shipments: [] };
-      setLcs([...lcs, newLC]);
+      savedLC = { ...lcData, id: Date.now(), shipments: [] };
+      setLcs([...lcs, savedLC]);
     }
-    navigate('lc-list');
+
+    if (options.afterSaveView === 'lc-form') {
+      navigate('lc-form', savedLC);
+    } else if (options.afterSaveView === 'lc-detail') {
+      navigate('lc-detail', savedLC);
+    } else if (options.afterSaveView !== false) {
+      navigate('lc-list');
+    }
+
+    return savedLC;
   };
 
   // Employee Handlers
