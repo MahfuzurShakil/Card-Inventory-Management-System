@@ -11,6 +11,7 @@ const Sidebar = ({ currentView, setCurrentView, children }) => {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [expandedMenus, setExpandedMenus] = useState({
     procurement: false,
+    store: false,
     production: false,
     employees: false,
     finance: false
@@ -28,12 +29,12 @@ const Sidebar = ({ currentView, setCurrentView, children }) => {
   };
 
   const menuItems = [
-    // {
-    //   id: 'dashboard',
-    //   label: 'Dashboard',
-    //   icon: LayoutDashboard,
-    //   view: 'dashboard'
-    // },
+    {
+      id: 'dashboard',
+      label: 'Dashboard',
+      icon: LayoutDashboard,
+      view: 'dashboard'
+    },
     {
       id: 'procurement',
       label: 'Procurement',
@@ -47,13 +48,21 @@ const Sidebar = ({ currentView, setCurrentView, children }) => {
       ]
     },
     {
+      id: 'store',
+      label: 'Store',
+      icon: Warehouse,
+      expandable: true,
+      submenu: [
+        { id: 'inbound-list', label: 'Inbound Material', icon: Inbox, view: 'inbound-list' },
+      ]
+    },
+    {
       id: 'production',
       label: 'Production',
       icon: Factory,
       expandable: true,
       submenu: [
         { id: 'production-dashboard', label: 'Overview', icon: BarChart3, view: 'production-dashboard' },
-        { id: 'inbound-list', label: 'Inbound Materials', icon: Inbox, view: 'inbound-list' },
         { id: 'box-list', label: 'Material Boxes', icon: Box, view: 'box-list' },
         { id: 'production', label: 'Production Tracking', icon: Activity, view: 'production' },
         { id: 'subbox-list', label: 'Finished Goods', icon: Layers, view: 'subbox-list' },

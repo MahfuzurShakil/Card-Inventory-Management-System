@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Fragment } from 'react';
 import { Ship, FileText, Building, CreditCard, Percent, Warehouse, ChevronRight, ChevronDown, Upload, Plus, X, Check, Package, AlertTriangle, Send, Lock } from 'lucide-react';
 
 const ShipmentDetail = ({ lc, shipment, onBack, onUpdateShipment, onComplete }) => {
@@ -602,7 +603,7 @@ const ShipmentDetail = ({ lc, shipment, onBack, onUpdateShipment, onComplete }) 
                       const qtyPerBox = effectiveBoxes > 0 ? Math.floor(totalQty / effectiveBoxes) : 0;
 
                       return (
-                        <>
+                        <Fragment key={`${item.serial || item.created_at || 'item'}-${idx}`}>
                           {/* ── Main item row ── */}
                           <tr key={`item-${idx}`}
                             className={`hover:bg-gray-50 cursor-pointer transition-colors ${isExpanded ? 'bg-green-50' : ''}`}
@@ -790,7 +791,7 @@ const ShipmentDetail = ({ lc, shipment, onBack, onUpdateShipment, onComplete }) 
                               </td>
                             </tr>
                           )}
-                        </>
+                        </Fragment>
                       );
                     })}
                   </tbody>

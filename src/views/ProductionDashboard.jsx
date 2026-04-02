@@ -10,7 +10,10 @@ const calcDaysToFinish = (availableUnits, subBoxes) => {
   const now = new Date();
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
   const recentConsumption = subBoxes
-    .filter(sb => new Date(sb.production_date) >= thirtyDaysAgo && sb.output_type === 'Good/ QC Approved')
+    .filter(sb => {
+      if (!sb.production_date) return false;
+      return new Date(sb.production_date) >= thirtyDaysAgo && sb.output_type === 'Good/ QC Approved';
+    })
     .reduce((s, sb) => s + (sb.quantity || 0), 0);
   const dailyRate = recentConsumption / 30;
   if (dailyRate <= 0) return null;
@@ -164,10 +167,13 @@ const ProductionDashboard = ({ lcs, employees, inboundMaterials, boxes, subBoxes
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [chartTimeFilter, setChartTimeFilter] = useState('monthly');
 
+  const productionSubBoxes = subBoxes.filter(sb => !!sb.production_date);
+
   const filteredSubBoxes = useMemo(() => {
     if (timeFilter === 'all') return subBoxes;
     const now = new Date();
     return subBoxes.filter(sb => {
+      if (!sb.production_date) return false;
       const d = new Date(sb.production_date);
       if (timeFilter === 'today') return d.toDateString() === now.toDateString();
       if (timeFilter === 'week') return d >= new Date(now - 7 * 86400000);
@@ -206,20 +212,20 @@ const ProductionDashboard = ({ lcs, employees, inboundMaterials, boxes, subBoxes
       return Array.from({ length: 7 }, (_, i) => {
         const date = new Date(now - (6 - i) * 86400000);
         const ds = date.toISOString().split('T')[0];
-        const d = subBoxes.filter(sb => sb.production_date === ds);
+        const d = productionSubBoxes.filter(sb => sb.production_date === ds);
         return { label: i === 6 ? 'Today' : date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), good: d.filter(sb => sb.output_type === 'Good/ QC Approved').reduce((s, sb) => s + (sb.quantity || 0), 0), wastage: d.filter(sb => sb.output_type === 'Wastage').reduce((s, sb) => s + (sb.quantity || 0), 0) };
       });
     } else if (chartTimeFilter === 'weekly') {
       return Array.from({ length: 7 }, (_, i) => {
         const ws = new Date(now - (6 - i) * 7 * 86400000), we = new Date(ws.getTime() + 7 * 86400000);
-        const d = subBoxes.filter(sb => { const x = new Date(sb.production_date); return x >= ws && x < we; });
+        const d = productionSubBoxes.filter(sb => { const x = new Date(sb.production_date); return x >= ws && x < we; });
         return { label: i === 6 ? 'This Wk' : `W${i + 1}`, good: d.filter(sb => sb.output_type === 'Good/ QC Approved').reduce((s, sb) => s + (sb.quantity || 0), 0), wastage: d.filter(sb => sb.output_type === 'Wastage').reduce((s, sb) => s + (sb.quantity || 0), 0) };
       });
     } else {
       return Array.from({ length: 6 }, (_, i) => {
         const date = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
         const ym = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-        const d = subBoxes.filter(sb => sb.production_date.startsWith(ym));
+        const d = productionSubBoxes.filter(sb => sb.production_date?.startsWith(ym));
         return { label: date.toLocaleDateString('en-US', { month: 'short' }), good: d.filter(sb => sb.output_type === 'Good/ QC Approved').reduce((s, sb) => s + (sb.quantity || 0), 0), wastage: d.filter(sb => sb.output_type === 'Wastage').reduce((s, sb) => s + (sb.quantity || 0), 0) };
       });
     }
