@@ -1,4 +1,22 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  Activity,
+  BarChart3,
+  Box,
+  Calendar,
+  DollarSign,
+  Factory,
+  FileText,
+  Inbox,
+  Layers,
+  LayoutDashboard,
+  Package,
+  Ship,
+  TrendingUp,
+  Truck,
+  Users,
+  Warehouse as WarehouseIcon,
+} from 'lucide-react';
 import Sidebar from './components/Sidebar';
 import Dashboard from './views/Dashboard';
 import LCList from './views/LCList';
@@ -39,11 +57,241 @@ import LocalCosts from './views/LocalCosts';
 import ShiftRosterList from './views/ShiftRosterList';
 
 import LandingCost from './views/LandingCost';
+import LandingPage from './views/LandingPage';
+import LoginPage from './views/LoginPage';
+import ForgotPasswordPage from './views/ForgotPasswordPage';
 
 
 import DeliveredGoods from './views/Deliveredgoods';
 import ChallanDetail  from './views/Challandetail';
 
+const AUTH_STORAGE_KEY = 'card-factory-demo-user';
+
+const DUMMY_USERS = [
+  {
+    id: 'admin-demo',
+    username: 'admin',
+    password: 'admin123',
+    email: 'admin@cardinventory.com',
+    name: 'System Admin',
+    role: 'admin',
+    roleLabel: 'Admin',
+  },
+  {
+    id: 'procurement-demo',
+    username: 'procurement',
+    password: 'procurement123',
+    email: 'procurement@cardinventory.com',
+    name: 'Procurement Officer',
+    role: 'procurement',
+    roleLabel: 'Procurement',
+  },
+  {
+    id: 'store-demo',
+    username: 'store',
+    password: 'store123',
+    email: 'store@cardinventory.com',
+    name: 'Store Officer',
+    role: 'store',
+    roleLabel: 'Store',
+  },
+  {
+    id: 'production-demo',
+    username: 'production',
+    password: 'production123',
+    email: 'production@cardinventory.com',
+    name: 'Production Supervisor',
+    role: 'production',
+    roleLabel: 'Production',
+  },
+  {
+    id: 'finance-demo',
+    username: 'finance',
+    password: 'finance123',
+    email: 'finance@cardinventory.com',
+    name: 'Finance Executive',
+    role: 'finance',
+    roleLabel: 'Finance',
+  },
+];
+
+const ROLE_DEFAULT_VIEWS = {
+  admin: 'dashboard',
+  procurement: 'procurement-dashboard',
+  store: 'inbound-list',
+  production: 'production-dashboard',
+  finance: 'finance-dashboard',
+};
+
+const ROLE_VIEW_ACCESS = {
+  admin: [
+    'dashboard',
+    'procurement-dashboard',
+    'lc-list',
+    'lc-detail',
+    'lc-form',
+    'shipment-detail',
+    'shipment-view',
+    'all-shipments',
+    'warehouse',
+    'reports',
+    'cost-analysis',
+    'production-dashboard',
+    'employee-list',
+    'employee-form',
+    'shift-roster-list',
+    'shift-assignment',
+    'inbound-list',
+    'inbound-receiving',
+    'inbound-shipment-boxes',
+    'box-list',
+    'box-creation',
+    'box-detail',
+    'production-issue',
+    'production',
+    'production-floor',
+    'subbox-list',
+    'subbox-creation',
+    'client-rejection',
+    'subbox-detail',
+    'create-challan',
+    'delivered-goods',
+    'challan-detail',
+    'finance-dashboard',
+    'landing-cost',
+    'local-costs',
+  ],
+  procurement: [
+    'procurement-dashboard',
+    'lc-list',
+    'lc-detail',
+    'lc-form',
+    'shipment-detail',
+    'shipment-view',
+    'all-shipments',
+    'warehouse',
+    'reports',
+    'cost-analysis',
+  ],
+  store: ['inbound-list', 'inbound-receiving', 'inbound-shipment-boxes'],
+  production: [
+    'production-dashboard',
+    'box-list',
+    'box-detail',
+    'box-creation',
+    'production-issue',
+    'production',
+    'production-floor',
+    'subbox-list',
+    'subbox-creation',
+    'subbox-detail',
+    'client-rejection',
+    'create-challan',
+    'delivered-goods',
+    'challan-detail',
+    'employee-list',
+    'employee-form',
+    'shift-roster-list',
+    'shift-assignment',
+  ],
+  finance: ['finance-dashboard', 'landing-cost', 'local-costs'],
+};
+
+const APP_MENU_ITEMS = [
+  {
+    id: 'dashboard',
+    label: 'Dashboard',
+    icon: LayoutDashboard,
+    view: 'dashboard',
+  },
+  {
+    id: 'procurement',
+    label: 'Procurement',
+    icon: Ship,
+    expandable: true,
+    submenu: [
+      { id: 'procurement-dashboard', label: 'Procurement Overview', icon: Ship, view: 'procurement-dashboard' },
+      { id: 'lc-list', label: 'Letters of Credit', icon: FileText, view: 'lc-list' },
+      { id: 'all-shipments', label: 'Shipments', icon: Package, view: 'all-shipments' },
+    ],
+  },
+  {
+    id: 'store',
+    label: 'Store',
+    icon: WarehouseIcon,
+    expandable: true,
+    submenu: [{ id: 'inbound-list', label: 'Inbound Material', icon: Inbox, view: 'inbound-list' }],
+  },
+  {
+    id: 'production',
+    label: 'Production',
+    icon: Factory,
+    expandable: true,
+    submenu: [
+      { id: 'production-dashboard', label: 'Overview', icon: BarChart3, view: 'production-dashboard' },
+      { id: 'box-list', label: 'Material Boxes', icon: Box, view: 'box-list' },
+      { id: 'production', label: 'Production Tracking', icon: Activity, view: 'production' },
+      { id: 'subbox-list', label: 'Finished Goods', icon: Layers, view: 'subbox-list' },
+      { id: 'delivered-goods', label: 'Delivered Goods', icon: Truck, view: 'delivered-goods' },
+    ],
+  },
+  {
+    id: 'employees',
+    label: 'Employee Management',
+    icon: Users,
+    expandable: true,
+    submenu: [
+      { id: 'employee-list', label: 'Employees', icon: Users, view: 'employee-list' },
+      { id: 'shift-roster-list', label: 'Shift Rosters', icon: Calendar, view: 'shift-roster-list' },
+    ],
+  },
+  {
+    id: 'finance',
+    label: 'Finance',
+    icon: DollarSign,
+    expandable: true,
+    submenu: [
+      { id: 'finance-dashboard', label: 'Finance Overview', icon: BarChart3, view: 'finance-dashboard' },
+      { id: 'landing-cost', label: 'Landing Cost', icon: TrendingUp, view: 'landing-cost' },
+      { id: 'local-costs', label: 'Local Costs', icon: DollarSign, view: 'local-costs' },
+    ],
+  },
+];
+
+const getUserByUsername = (username, users = DUMMY_USERS) =>
+  users.find((user) => user.username.toLowerCase() === String(username || '').toLowerCase()) || null;
+
+const getDefaultViewForRole = (role) => ROLE_DEFAULT_VIEWS[role] || 'dashboard';
+
+const canAccessView = (role, view) => (ROLE_VIEW_ACCESS[role] || []).includes(view);
+
+const getStoredUser = (users = DUMMY_USERS) => {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    const savedUsername = window.localStorage.getItem(AUTH_STORAGE_KEY);
+    return savedUsername ? getUserByUsername(savedUsername, users) : null;
+  } catch {
+    return null;
+  }
+};
+
+const getAllowedMenuItems = (role) =>
+  APP_MENU_ITEMS.reduce((items, item) => {
+    if (item.expandable) {
+      const submenu = item.submenu.filter((subItem) => canAccessView(role, subItem.view));
+      if (submenu.length > 0) {
+        items.push({ ...item, submenu });
+      }
+      return items;
+    }
+
+    if (canAccessView(role, item.view)) {
+      items.push(item);
+    }
+
+    return items;
+  }, []);
 
 // INITIAL MOCK DATA WITH COMPLETED SHIPMENT FOR TESTING
 const INITIAL_LCS = [
@@ -336,7 +584,24 @@ const INITIAL_BOXES = [];
 const INITIAL_SUB_BOXES = [];
 
 function App() {
-  const [currentView, setCurrentView] = useState('dashboard');
+  const [demoUsers, setDemoUsers] = useState(DUMMY_USERS);
+  const initialUser = getStoredUser(DUMMY_USERS);
+  const [currentUser, setCurrentUser] = useState(initialUser);
+  const [authScreen, setAuthScreen] = useState(initialUser ? 'app' : 'landing');
+  const [currentView, setCurrentView] = useState(
+    initialUser ? getDefaultViewForRole(initialUser.role) : 'dashboard'
+  );
+  const [loginCredentials, setLoginCredentials] = useState({ username: '', password: '' });
+  const [loginError, setLoginError] = useState('');
+  const [loginNotice, setLoginNotice] = useState('');
+  const [forgotPasswordStep, setForgotPasswordStep] = useState('request');
+  const [forgotPasswordEmail, setForgotPasswordEmail] = useState('');
+  const [forgotPasswordTarget, setForgotPasswordTarget] = useState(null);
+  const [forgotPasswordValues, setForgotPasswordValues] = useState({
+    newPassword: '',
+    confirmPassword: '',
+  });
+  const [forgotPasswordError, setForgotPasswordError] = useState('');
   const [selectedLC, setSelectedLC] = useState(null);
   const [selectedShipment, setSelectedShipment] = useState(null);
   const [selectedEmployee, setSelectedEmployee] = useState(null);
@@ -372,9 +637,21 @@ const [selectedSubBoxIdsForChallan, setSelectedSubBoxIdsForChallan] = useState([
 const [financeData, setFinanceData] = useState({});
 
 const [selectedChallan, setSelectedChallan] = useState(null);
+  const allowedMenuItems = useMemo(
+    () => (currentUser ? getAllowedMenuItems(currentUser.role) : []),
+    [currentUser]
+  );
   
   const navigate = (view, lc = null, material = null, employee = null, box = null, subBox = null, context = null) => {
-    setCurrentView(view);
+    if (!currentUser) return;
+
+    const nextView = canAccessView(currentUser.role, view)
+      ? view
+      : getDefaultViewForRole(currentUser.role);
+
+    setCurrentView(nextView);
+    if (nextView !== view) return;
+
     if (lc) setSelectedLC(lc);
     if (material) setSelectedMaterial(material);
     if (employee) setSelectedEmployee(employee);
@@ -386,6 +663,156 @@ const [selectedChallan, setSelectedChallan] = useState(null);
     if (view === 'shipment-detail' && material && lc) {
       setSelectedShipment(material);
     }
+  };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    try {
+      if (currentUser) {
+        window.localStorage.setItem(AUTH_STORAGE_KEY, currentUser.username);
+      } else {
+        window.localStorage.removeItem(AUTH_STORAGE_KEY);
+      }
+    } catch {
+      // Ignore local storage write failures in demo mode.
+    }
+  }, [currentUser]);
+
+  const handleLoginInputChange = (event) => {
+    const { name, value } = event.target;
+    setLoginCredentials((prev) => ({ ...prev, [name]: value }));
+    if (loginError) {
+      setLoginError('');
+    }
+    if (loginNotice) {
+      setLoginNotice('');
+    }
+  };
+
+  const handleLoginSubmit = (event) => {
+    event.preventDefault();
+
+    const matchedUser = demoUsers.find(
+      (user) =>
+        user.username.toLowerCase() === loginCredentials.username.trim().toLowerCase() &&
+        user.password === loginCredentials.password
+    );
+
+    if (!matchedUser) {
+      setLoginError('Invalid username or password. Please use one of the demo credentials.');
+      return;
+    }
+
+    setCurrentUser(matchedUser);
+    setCurrentView(getDefaultViewForRole(matchedUser.role));
+    setAuthScreen('app');
+    setLoginError('');
+    setLoginNotice('');
+    setLoginCredentials({ username: '', password: '' });
+  };
+
+  const resetForgotPasswordState = () => {
+    setForgotPasswordStep('request');
+    setForgotPasswordEmail('');
+    setForgotPasswordTarget(null);
+    setForgotPasswordValues({ newPassword: '', confirmPassword: '' });
+    setForgotPasswordError('');
+  };
+
+  const openLoginScreen = () => {
+    setLoginError('');
+    setAuthScreen('login');
+  };
+
+  const handleSelectDemoUser = (user) => {
+    setLoginCredentials({ username: user.username, password: user.password });
+    setLoginError('');
+    setLoginNotice('');
+  };
+
+  const handleForgotPasswordEmailChange = (event) => {
+    setForgotPasswordEmail(event.target.value);
+    if (forgotPasswordError) {
+      setForgotPasswordError('');
+    }
+  };
+
+  const handleForgotPasswordValueChange = (event) => {
+    const { name, value } = event.target;
+    setForgotPasswordValues((prev) => ({ ...prev, [name]: value }));
+    if (forgotPasswordError) {
+      setForgotPasswordError('');
+    }
+  };
+
+  const handleForgotPasswordSend = (event) => {
+    event.preventDefault();
+
+    const matchedUser = demoUsers.find(
+      (user) => user.email.toLowerCase() === forgotPasswordEmail.trim().toLowerCase()
+    );
+
+    if (!matchedUser) {
+      setForgotPasswordError('No demo user was found with this email address.');
+      return;
+    }
+
+    setForgotPasswordTarget(matchedUser);
+    setForgotPasswordStep('reset');
+    setForgotPasswordError('');
+  };
+
+  const handleForgotPasswordSubmit = (event) => {
+    event.preventDefault();
+
+    if (!forgotPasswordTarget) {
+      setForgotPasswordError('Please start the password reset process again.');
+      return;
+    }
+
+    if (!forgotPasswordValues.newPassword || !forgotPasswordValues.confirmPassword) {
+      setForgotPasswordError('Please complete both password fields.');
+      return;
+    }
+
+    if (forgotPasswordValues.newPassword !== forgotPasswordValues.confirmPassword) {
+      setForgotPasswordError('New password and confirm password do not match.');
+      return;
+    }
+
+    const updatedUsers = demoUsers.map((user) =>
+      user.id === forgotPasswordTarget.id
+        ? { ...user, password: forgotPasswordValues.newPassword }
+        : user
+    );
+
+    setDemoUsers(updatedUsers);
+    setLoginCredentials({
+      username: forgotPasswordTarget.username,
+      password: forgotPasswordValues.newPassword,
+    });
+    setLoginNotice('Password updated successfully. You can now sign in with the new password.');
+    resetForgotPasswordState();
+    setLoginError('');
+    setAuthScreen('login');
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    setAuthScreen('landing');
+    setCurrentView('dashboard');
+    setLoginError('');
+    setLoginNotice('');
+    setLoginCredentials({ username: '', password: '' });
+    resetForgotPasswordState();
+    setSelectedLC(null);
+    setSelectedShipment(null);
+    setSelectedEmployee(null);
+    setSelectedBox(null);
+    setSelectedSubBox(null);
+    setSelectedMaterial(null);
+    setSelectedChallan(null);
   };
 
   // Handle View Shipment from Dashboard
@@ -669,7 +1096,7 @@ const handleSaveAssignments = (assignments) => {
     navigate('production-floor');
   };
 
-  const handleUpdateShiftData = (shiftId, updates) => {
+ const _handleUpdateShiftData = (shiftId, updates) => {
     setProductionShifts(prev => 
       prev.map(shift => shift.id === shiftId ? { ...shift, ...updates } : shift)
     );
@@ -888,6 +1315,21 @@ const handlePaymentSave = (finKey, payments) => {
   setFinanceData(prev => ({ ...prev, [finKey]: payments }));
 };
 
+  const renderProcurementDashboard = () => (
+    <Dashboard
+      lcs={lcs}
+      onSelectLC={(lc) => navigate('lc-detail', lc)}
+      onViewShipment={handleViewShipment}
+      onSelectShipment={(lc, shipment) => {
+        setSelectedLC(lc);
+        setSelectedShipment(shipment);
+        navigate('shipment-detail', lc, shipment);
+      }}
+      onViewAllLCs={() => navigate('lc-list')}
+      onViewAllShipments={() => navigate('all-shipments')}
+    />
+  );
+
   const renderContent = () => {
     switch(currentView) {
       case 'dashboard':
@@ -912,6 +1354,9 @@ const handlePaymentSave = (finKey, payments) => {
             onViewAllShipments={() => navigate('all-shipments')}
           />
         );
+
+      case 'procurement-dashboard':
+        return renderProcurementDashboard();
       
       case 'lc-list':
         return (
@@ -1278,24 +1723,8 @@ case 'local-costs':
 
 
 case 'profitability':
-  return (
-    <ProfitabilityAnalysis
-      lcs={lcs}
-      localCosts={localCosts}
-      subBoxes={subBoxes}
-      sales={sales} // You'll need to add this
-      onNavigate={navigate}
-    />
-  );
-  case 'cost-reports':
-  return (
-    <CostReports
-      lcs={lcs}
-      localCosts={localCosts}
-      subBoxes={subBoxes}
-      onNavigate={navigate}
-    />
-  );
+case 'cost-reports':
+  return <Reports lcs={lcs} />;
 
   case 'delivered-goods':
   return (
@@ -1320,12 +1749,89 @@ case 'challan-detail':
 
 
       default:
-        return <Dashboard lcs={lcs} onSelectLC={(lc) => navigate('lc-detail', lc)} />;
+        if (!currentUser) return null;
+        return currentUser.role === 'admin' ? (
+          <AdminDashboard
+            lcs={lcs}
+            employees={employees}
+            inboundMaterials={inboundMaterials}
+            boxes={boxes}
+            subBoxes={subBoxes}
+            localCosts={localCosts}
+            productionAssignments={productionAssignments}
+            onNavigate={navigate}
+            onSelectLC={(lc) => navigate('lc-detail', lc)}
+            onViewShipment={handleViewShipment}
+            onSelectShipment={(lc, shipment) => {
+              setSelectedLC(lc);
+              setSelectedShipment(shipment);
+              navigate('shipment-detail', lc, shipment);
+            }}
+            onViewAllLCs={() => navigate('lc-list')}
+            onViewAllShipments={() => navigate('all-shipments')}
+          />
+        ) : renderProcurementDashboard();
     }
   };
 
+  if (authScreen === 'landing') {
+    return <LandingPage onLoginClick={() => setAuthScreen('login')} />;
+  }
+
+  if (authScreen === 'login') {
+    return (
+      <LoginPage
+        credentials={loginCredentials}
+        error={loginError}
+        notice={loginNotice}
+        onBack={() => {
+          setLoginError('');
+          setLoginNotice('');
+          setLoginCredentials({ username: '', password: '' });
+          setAuthScreen('landing');
+        }}
+        onChange={handleLoginInputChange}
+        onSubmit={handleLoginSubmit}
+        onForgotPassword={() => {
+          setLoginError('');
+          setLoginNotice('');
+          resetForgotPasswordState();
+          setAuthScreen('forgot-password');
+        }}
+        onSelectDemoUser={handleSelectDemoUser}
+        dummyUsers={demoUsers}
+      />
+    );
+  }
+
+  if (authScreen === 'forgot-password') {
+    return (
+      <ForgotPasswordPage
+        step={forgotPasswordStep}
+        email={forgotPasswordEmail}
+        values={forgotPasswordValues}
+        error={forgotPasswordError}
+        targetUser={forgotPasswordTarget}
+        onBack={() => {
+          resetForgotPasswordState();
+          openLoginScreen();
+        }}
+        onEmailChange={handleForgotPasswordEmailChange}
+        onPasswordChange={handleForgotPasswordValueChange}
+        onSendEmail={handleForgotPasswordSend}
+        onSubmitReset={handleForgotPasswordSubmit}
+      />
+    );
+  }
+
   return (
-    <Sidebar currentView={currentView} setCurrentView={navigate}>
+    <Sidebar
+      currentView={currentView}
+      setCurrentView={navigate}
+      currentUser={currentUser}
+      onLogout={handleLogout}
+      menuItems={allowedMenuItems}
+    >
       {renderContent()}
     </Sidebar>
   );
