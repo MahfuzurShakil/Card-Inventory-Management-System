@@ -22,16 +22,16 @@ const SubBoxRow = ({ sb, onRemove }) => {
             {good ? 'QC' : 'Wastage'}
           </span>
           <span className={`text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${
-            sb.shift === 'Day' ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700'
+            sb.shift === 'Day' ? 'bg-amber-100 text-amber-700' : sb.shift === 'Night' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-200 text-gray-700'
           }`}>
-            {sb.shift}
+            {sb.shift || 'Ready Made'}
           </span>
         </div>
         <p className="text-xs text-gray-400 mt-0.5 font-mono truncate">{sb.barcode || '—'}</p>
       </div>
       <div className="text-right flex-shrink-0">
         <p className="text-sm font-bold text-gray-800">{(sb.quantity || 0).toLocaleString()}</p>
-        <p className="text-xs text-gray-400">{sb.production_date}</p>
+        <p className="text-xs text-gray-400">{sb.production_date || '—'}</p>
       </div>
       <button
         onClick={() => onRemove(sb.id)}
@@ -76,7 +76,7 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
   const dispatchableBoxes = subBoxes.filter(sb =>
     sb.barcode &&
     sb.box_type !== 'Partial' &&
-    sb.delivery_status !== 'Dispatched' &&
+    (sb.delivery_status || 'delivery_pending') === 'delivery_pending' &&
     !addedIds.includes(sb.id)
   );
 
@@ -112,8 +112,8 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
       return;
     }
 
-    if (found.delivery_status === 'Dispatched') {
-      setScanError(`Already dispatched: ${found.sub_box_name || found.barcode}`);
+    if ((found.delivery_status || 'delivery_pending') !== 'delivery_pending') {
+      setScanError(`Unavailable for challan: ${found.sub_box_name || found.barcode}`);
       setScanValue('');
       return;
     }
@@ -166,7 +166,8 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
 
     setConfirmError('');
     onDispatch(addedIds, {
-      delivery_status: 'Dispatched',
+      delivery_status: 'ready_for_delivery',
+      challan_status: 'pending',
       challan_no: challanPayload.challan_no,
       challan_date: challanPayload.date,
       challan_prepared_by: challanPayload.prepared_by,

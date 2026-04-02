@@ -17,7 +17,7 @@ function buildChallans(subBoxes) {
   const map = {};
 
   subBoxes.forEach(sb => {
-    if (!sb.challan_no || sb.delivery_status !== 'Dispatched') return;
+    if (!sb.challan_no) return;
 
     if (!map[sb.challan_no]) {
       map[sb.challan_no] = {
@@ -27,6 +27,7 @@ function buildChallans(subBoxes) {
         item_name: sb.challan_item_name || 'Smart Blank Card',
         item_description: sb.challan_item_description || sb.challan_remarks || '',
         remarks: sb.challan_item_description || sb.challan_remarks || '',
+        status: sb.challan_status || (sb.delivery_status === 'delivered' ? 'delivered' : 'pending'),
         boxes: [],
       };
     }
@@ -42,7 +43,7 @@ function buildChallans(subBoxes) {
   });
 }
 
-const DeliveredGoods = ({ subBoxes = [], onViewChallan }) => {
+const DeliveredGoods = ({ subBoxes = [], onViewChallan, onMarkDelivered }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [dateFilter, setDateFilter] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -83,7 +84,7 @@ const DeliveredGoods = ({ subBoxes = [], onViewChallan }) => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Delivered Goods</h1>
-          <p className="text-sm text-gray-500 mt-1">Confirmed challans for dispatched finished good boxes</p>
+          <p className="text-sm text-gray-500 mt-1">Track challans prepared for delivery and confirm final dispatch</p>
         </div>
       </div>
 
@@ -93,7 +94,7 @@ const DeliveredGoods = ({ subBoxes = [], onViewChallan }) => {
             <div>
               <p className="text-xs font-medium text-gray-500">Total Challans</p>
               <p className="text-2xl font-bold text-gray-900 mt-1">{challans.length}</p>
-              <p className="text-xs text-gray-400 mt-0.5">confirmed dispatches</p>
+              <p className="text-xs text-gray-400 mt-0.5">prepared or delivered</p>
             </div>
             <div className="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center">
               <FileText className="w-5 h-5 text-indigo-600" />
@@ -104,7 +105,7 @@ const DeliveredGoods = ({ subBoxes = [], onViewChallan }) => {
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-xs font-medium text-gray-500">Boxes Dispatched</p>
+              <p className="text-xs font-medium text-gray-500">Boxes on Challans</p>
               <p className="text-2xl font-bold text-gray-900 mt-1">{totalBoxes.toLocaleString()}</p>
               <p className="text-xs text-gray-400 mt-0.5">sub-boxes total</p>
             </div>
@@ -117,7 +118,7 @@ const DeliveredGoods = ({ subBoxes = [], onViewChallan }) => {
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-xs font-medium text-gray-500">Units Dispatched</p>
+              <p className="text-xs font-medium text-gray-500">Units on Challans</p>
               <p className="text-2xl font-bold text-gray-900 mt-1">{totalUnits.toLocaleString()}</p>
               <p className="text-xs text-gray-400 mt-0.5">across all challans</p>
             </div>
@@ -132,7 +133,7 @@ const DeliveredGoods = ({ subBoxes = [], onViewChallan }) => {
             <div>
               <p className="text-xs font-medium text-gray-500">Avg. Boxes / Challan</p>
               <p className="text-2xl font-bold text-gray-900 mt-1">{averageBoxesPerChallan}</p>
-              <p className="text-xs text-gray-400 mt-0.5">per dispatched challan</p>
+              <p className="text-xs text-gray-400 mt-0.5">per active challan</p>
             </div>
             <div className="w-10 h-10 bg-amber-100 rounded-lg flex items-center justify-center">
               <Package className="w-5 h-5 text-amber-600" />
@@ -186,6 +187,7 @@ const DeliveredGoods = ({ subBoxes = [], onViewChallan }) => {
                 <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider text-right">No. of Boxes</th>
                 <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider text-right">Total Quantity</th>
                 <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Prepared By</th>
+                <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
                 <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Action</th>
               </tr>
             </thead>
@@ -227,6 +229,17 @@ const DeliveredGoods = ({ subBoxes = [], onViewChallan }) => {
                     </td>
 
                     <td className="px-6 py-4">
+                      <span className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-full ${
+                        challan.status === 'delivered'
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : 'bg-amber-100 text-amber-800'
+                      }`}>
+                        <Truck className="w-3 h-3" />
+                        {challan.status === 'delivered' ? 'Delivered' : 'Pending'}
+                      </span>
+                    </td>
+
+                    <td className="px-6 py-4">
                       <div className="flex items-center gap-2 justify-end">
                         <button
                           onClick={() => onViewChallan(challan)}
@@ -240,20 +253,28 @@ const DeliveredGoods = ({ subBoxes = [], onViewChallan }) => {
                         >
                           <Download className="w-3.5 h-3.5" /> Details
                         </button>
+                        {challan.status !== 'delivered' && (
+                          <button
+                            onClick={() => onMarkDelivered && onMarkDelivered(challan.challan_no)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-700 border border-emerald-200 bg-emerald-50 rounded-lg hover:bg-emerald-100 transition-colors"
+                          >
+                            <Truck className="w-3.5 h-3.5" /> Mark Delivered
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
                 );
               }) : (
                 <tr>
-                  <td colSpan="6" className="px-6 py-12 text-center">
+                  <td colSpan="7" className="px-6 py-12 text-center">
                     <div>
                       <Truck className="w-12 h-12 mx-auto mb-3 text-gray-300" />
                       <p className="text-sm text-gray-500 mb-1">
                         {hasFilters ? 'No challans match your filters.' : 'No challans created yet.'}
                       </p>
                       <p className="text-xs text-gray-400">
-                        {!hasFilters && 'Confirm a challan from Finished Goods to see dispatch records here.'}
+                        {!hasFilters && 'Create a challan from Finished Goods to see prepared delivery records here.'}
                       </p>
                     </div>
                   </td>

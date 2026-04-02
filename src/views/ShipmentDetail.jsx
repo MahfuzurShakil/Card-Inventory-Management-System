@@ -12,7 +12,7 @@ const ShipmentDetail = ({ lc, shipment, onBack, onUpdateShipment, onComplete }) 
   // Rebox confirmation: { index, field, value } — set when user edits no_of_boxes/qty_per_box on a drafted item
   const [reboxConfirm, setReboxConfirm] = useState(null);
 
-  const ITEM_TYPES = ['Chip', 'Tape', 'Sheet'];
+  const ITEM_TYPES = ['Chip', 'Tape', 'Sheet', 'Blank Card'];
 
   const steps = [
     { id: 1, name: 'Freight Forwarder', icon: Ship, color: 'blue' },

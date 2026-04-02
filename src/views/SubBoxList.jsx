@@ -85,17 +85,19 @@ function openPrintWindow(sbList) {
   const labels = sbList.map(sb => {
     const src  = barcodeBase64(sb.barcode);
     const good = sb.output_type === 'Good/ QC Approved';
+    const shiftLabel = sb.shift ? `${sb.shift} Shift` : 'Ready Made';
+    const dateLabel = sb.production_date || '—';
     return `
     <div class="label">
       <div class="top-row">
         <span class="label-title">Finished Good Sub-Box</span>
-        <span class="shift-badge ${sb.shift === 'Day' ? 'shift-day' : 'shift-night'}">${sb.shift} Shift</span>
+        <span class="shift-badge ${sb.shift === 'Day' ? 'shift-day' : sb.shift === 'Night' ? 'shift-night' : 'shift-neutral'}">${shiftLabel}</span>
       </div>
       <div class="box-name">${sb.sub_box_name || sb.box_name || sb.barcode}</div>
       <span class="badge ${good ? 'badge-good' : 'badge-bad'}">${good ? 'QC Approved' : 'Wastage'}</span>
       <img class="bc" src="${src}" alt="${sb.barcode}" />
       <div class="meta">
-        <span><b>Date:</b> ${sb.production_date}</span>
+        <span><b>Date:</b> ${dateLabel}</span>
         <span><b>Qty:</b> ${(sb.quantity || 0).toLocaleString()}</span>
         <span><b>Type:</b> ${good ? 'Good' : 'Wastage'}</span>
       </div>
@@ -120,6 +122,7 @@ function openPrintWindow(sbList) {
   .shift-badge { font-size:7px; font-weight:700; padding:1px 5px; border-radius:99px; }
   .shift-day   { background:#fef3c7; color:#92400e; }
   .shift-night { background:#e0e7ff; color:#3730a3; }
+  .shift-neutral { background:#e5e7eb; color:#374151; }
   .box-name { font-size:13px; font-weight:700; color:#111827; letter-spacing:0.3px; }
   .badge { font-size:8px; font-weight:700; padding:1.5px 8px; border-radius:99px; align-self:flex-start; }
   .badge-good { background:#dcfce7; color:#166534; }
@@ -175,8 +178,8 @@ const BarcodePrintModal = ({ subBoxes, onClose }) => (
                 <div className="px-4 pt-3 pb-2 flex items-center justify-between border-b border-gray-100">
                   <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Finished Good Sub-Box</span>
                   <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                    sb.shift === 'Day' ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700'
-                  }`}>{sb.shift}</span>
+                    sb.shift === 'Day' ? 'bg-amber-100 text-amber-700' : sb.shift === 'Night' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-200 text-gray-700'
+                  }`}>{sb.shift || 'Ready Made'}</span>
                 </div>
                 <div className="px-4 py-3 flex flex-col items-center gap-2">
                   <p className="text-sm font-bold text-gray-900">{sb.sub_box_name || sb.box_name || sb.barcode}</p>
@@ -185,7 +188,7 @@ const BarcodePrintModal = ({ subBoxes, onClose }) => (
                   </span>
                   <BarcodeSVG value={sb.barcode} width={260} height={65} />
                   <div className="w-full flex justify-between text-xs text-gray-500 border-t border-gray-100 pt-2">
-                    <span><span className="text-gray-400">Date:</span> <b>{sb.production_date}</b></span>
+                    <span><span className="text-gray-400">Date:</span> <b>{sb.production_date || '—'}</b></span>
                     <span><span className="text-gray-400">Qty:</span> <b>{(sb.quantity || 0).toLocaleString()}</b></span>
                   </div>
                 </div>
@@ -217,9 +220,14 @@ const BoxTypeBadge = ({ type }) => {
 };
 
 const DeliveryStatusBadge = ({ status }) => {
-  if (status === 'Dispatched') return (
+  if (status === 'delivered') return (
     <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-700">
-      <Truck className="w-3 h-3" /> Dispatched
+      <Truck className="w-3 h-3" /> Delivered
+    </span>
+  );
+  if (status === 'ready_for_delivery') return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-full bg-blue-100 text-blue-700">
+      <Truck className="w-3 h-3" /> Ready
     </span>
   );
   return (
@@ -228,6 +236,14 @@ const DeliveryStatusBadge = ({ status }) => {
     </span>
   );
 };
+
+const SourceTypeBadge = ({ sourceType }) => (
+  <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-full ${
+    sourceType === 'ready_made' ? 'bg-cyan-100 text-cyan-800' : 'bg-violet-100 text-violet-800'
+  }`}>
+    {sourceType === 'ready_made' ? 'Ready Made' : 'Production'}
+  </span>
+);
 
 // ── Main Component ────────────────────────────────────────────────────────────
 const SubBoxList = ({ subBoxes, boxes, onCreateSubBox, onViewSubBox, onRecordRejection, onCreateChallan }) => {
@@ -249,11 +265,13 @@ const SubBoxList = ({ subBoxes, boxes, onCreateSubBox, onViewSubBox, onRecordRej
       sb.shift?.toLowerCase().includes(q) ||
       sb.box_name?.toLowerCase().includes(q) ||
       sb.sub_box_name?.toLowerCase().includes(q) ||
-      sb.production_date?.includes(q);
+      sb.production_date?.includes(q) ||
+      sb.lc_number?.toLowerCase().includes(q) ||
+      sb.sourceType?.replace('_', ' ')?.toLowerCase().includes(q);
     const matchType     = outputTypeFilter === 'all' || sb.output_type === outputTypeFilter;
     const matchShift    = shiftFilter === 'all' || sb.shift === shiftFilter;
     const matchBoxType  = boxTypeFilter === 'all' || (sb.box_type || 'Full') === boxTypeFilter;
-    const matchDelivery = deliveryFilter === 'all' || (sb.delivery_status || 'Pending') === deliveryFilter;
+    const matchDelivery = deliveryFilter === 'all' || (sb.delivery_status || 'delivery_pending') === deliveryFilter;
     return matchText && matchType && matchShift && matchBoxType && matchDelivery;
   });
 
@@ -263,7 +281,9 @@ const SubBoxList = ({ subBoxes, boxes, onCreateSubBox, onViewSubBox, onRecordRej
   const handleFC      = (setter) => (v) => { setter(v); setCurrentPage(1); };
 
   // ── Selection — partial boxes are excluded from select ────────────────────
-  const isSelectable  = (sb) => (sb.box_type || 'Full') !== 'Partial';
+  const isSelectable  = (sb) =>
+    (sb.box_type || 'Full') !== 'Partial' &&
+    (sb.delivery_status || 'delivery_pending') === 'delivery_pending';
   const toggleId      = (id) => {
     const sb = subBoxes.find(b => b.id === id);
     if (!sb || !isSelectable(sb)) return;
@@ -297,7 +317,8 @@ const SubBoxList = ({ subBoxes, boxes, onCreateSubBox, onViewSubBox, onRecordRej
   const totalProduced   = subBoxes.reduce((s, sb) => s + (sb.quantity || 0), 0);
   const totalWastage    = subBoxes.filter(sb => sb.output_type === 'Wastage').reduce((s, sb) => s + (sb.quantity || 0), 0);
   const totalRejected   = subBoxes.reduce((s, sb) => s + (sb.client_rejected_count || 0), 0);
-  const dispatchedCount = subBoxes.filter(sb => sb.delivery_status === 'Dispatched').length;
+  const readyCount      = subBoxes.filter(sb => sb.delivery_status === 'ready_for_delivery').length;
+  const deliveredCount  = subBoxes.filter(sb => sb.delivery_status === 'delivered').length;
   const wastagePercentage = totalProduced > 0 ? ((totalWastage / totalProduced) * 100).toFixed(1) : 0;
 
   return (
@@ -308,7 +329,7 @@ const SubBoxList = ({ subBoxes, boxes, onCreateSubBox, onViewSubBox, onRecordRej
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Finished Goods Management</h1>
-          <p className="text-sm text-gray-500 mt-1">Track production output, quality, and client rejections</p>
+          <p className="text-sm text-gray-500 mt-1">Track finished goods from production and ready-made inbound receipts</p>
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -344,7 +365,7 @@ const SubBoxList = ({ subBoxes, boxes, onCreateSubBox, onViewSubBox, onRecordRej
           { label: 'Wastage',         value: wastageCount,       icon: XCircle,       ibg: 'bg-red-100',    icl: 'text-red-600',   vcl: 'text-red-900',    sub: `${totalWastage.toLocaleString()} units` },
           { label: 'Wastage Rate',    value: `${wastagePercentage}%`, icon: AlertTriangle, ibg: parseFloat(wastagePercentage)>5?'bg-red-100':'bg-emerald-100', icl: parseFloat(wastagePercentage)>5?'text-red-600':'text-emerald-600', vcl: 'text-gray-900', sub: null },
           { label: 'Client Rejected', value: totalRejected,      icon: AlertTriangle, ibg: 'bg-orange-100', icl: 'text-orange-600', vcl: 'text-orange-900', sub: 'units' },
-          { label: 'Dispatched',      value: dispatchedCount,    icon: Truck,         ibg: 'bg-blue-100',   icl: 'text-blue-600',  vcl: 'text-blue-900',   sub: `${totalSubBoxes - dispatchedCount} pending` },
+          { label: 'Ready to Deliver', value: readyCount,        icon: Truck,         ibg: 'bg-blue-100',   icl: 'text-blue-600',  vcl: 'text-blue-900',   sub: `${deliveredCount} delivered` },
         ].map(({ label, value, sub, icon: Icon, ibg, icl, vcl }) => (
           <div key={label} className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
             <div className="flex items-start justify-between gap-2">
@@ -367,7 +388,7 @@ const SubBoxList = ({ subBoxes, boxes, onCreateSubBox, onViewSubBox, onRecordRej
           <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0" />
           <p className="text-xs text-amber-800">
             <span className="font-semibold">{partialCount} partial box{partialCount !== 1 ? 'es' : ''}</span> in progress — no barcode until filled.
-            Partial boxes cannot be selected for printing or challan creation.
+            Partial boxes and already prepared boxes cannot be selected for new challans.
           </p>
         </div>
       )}
@@ -379,7 +400,7 @@ const SubBoxList = ({ subBoxes, boxes, onCreateSubBox, onViewSubBox, onRecordRej
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input
             type="text"
-            placeholder="Search name, barcode, shift, date..."
+            placeholder="Search name, barcode, shift, LC, date..."
             className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             value={searchTerm}
             onChange={e => handleFC(setSearchTerm)(e.target.value)}
@@ -422,8 +443,9 @@ const SubBoxList = ({ subBoxes, boxes, onCreateSubBox, onViewSubBox, onRecordRej
           onChange={e => handleFC(setDeliveryFilter)(e.target.value)}
         >
           <option value="all">All Delivery</option>
-          <option value="Pending">Pending</option>
-          <option value="Dispatched">Dispatched</option>
+          <option value="delivery_pending">Pending</option>
+          <option value="ready_for_delivery">Ready for Delivery</option>
+          <option value="delivered">Delivered</option>
         </select>
       </div>
 
@@ -447,6 +469,8 @@ const SubBoxList = ({ subBoxes, boxes, onCreateSubBox, onViewSubBox, onRecordRej
                   'Sub-Box Name',
                   'Barcode',
                   'Output Type',
+                  'Source Type',
+                  'LC Number',
                   'Box Type',
                   'Delivery Status',
                   'Quantity',
@@ -468,7 +492,7 @@ const SubBoxList = ({ subBoxes, boxes, onCreateSubBox, onViewSubBox, onRecordRej
                 const hasRej      = (sb.client_rejected_count || 0) > 0;
                 const good        = sb.output_type === 'Good/ QC Approved';
                 const isPartial   = (sb.box_type || 'Full') === 'Partial';
-                const selectable  = !isPartial;
+                const selectable  = isSelectable(sb);
                 const isSelected  = selectedIds.includes(sb.id);
                 const rowBg       = isSelected ? 'bg-blue-50' : isPartial ? 'bg-amber-50/40' : '';
 
@@ -525,6 +549,14 @@ const SubBoxList = ({ subBoxes, boxes, onCreateSubBox, onViewSubBox, onRecordRej
                       )}
                     </td>
 
+                    <td className="px-4 py-3.5">
+                      <SourceTypeBadge sourceType={sb.sourceType || 'production'} />
+                    </td>
+
+                    <td className="px-4 py-3.5 text-sm text-gray-700 whitespace-nowrap">
+                      {sb.lc_number || '—'}
+                    </td>
+
                     {/* Box Type — NEW */}
                     <td className="px-4 py-3.5">
                       <BoxTypeBadge type={sb.box_type || 'Full'} />
@@ -535,7 +567,7 @@ const SubBoxList = ({ subBoxes, boxes, onCreateSubBox, onViewSubBox, onRecordRej
                       {isPartial ? (
                         <span className="text-xs text-gray-400 italic">—</span>
                       ) : (
-                        <DeliveryStatusBadge status={sb.delivery_status || 'Pending'} />
+                        <DeliveryStatusBadge status={sb.delivery_status || 'delivery_pending'} />
                       )}
                     </td>
 
@@ -558,11 +590,15 @@ const SubBoxList = ({ subBoxes, boxes, onCreateSubBox, onViewSubBox, onRecordRej
 
                     {/* Shift */}
                     <td className="px-4 py-3.5">
-                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                        sb.shift === 'Day' ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700'
-                      }`}>
-                        {sb.shift}
-                      </span>
+                      {sb.shift ? (
+                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                          sb.shift === 'Day' ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700'
+                        }`}>
+                          {sb.shift}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-gray-400">—</span>
+                      )}
                     </td>
 
                     {/* Production Date */}
@@ -612,7 +648,7 @@ const SubBoxList = ({ subBoxes, boxes, onCreateSubBox, onViewSubBox, onRecordRej
                 );
               }) : (
                 <tr>
-                  <td colSpan="11" className="px-6 py-12 text-center text-sm text-gray-500">
+                  <td colSpan="13" className="px-6 py-12 text-center text-sm text-gray-500">
                     {searchTerm || outputTypeFilter !== 'all' || shiftFilter !== 'all' || boxTypeFilter !== 'all' || deliveryFilter !== 'all'
                       ? 'No sub-boxes found matching your filters.'
                       : (

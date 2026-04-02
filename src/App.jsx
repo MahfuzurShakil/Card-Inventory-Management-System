@@ -283,6 +283,41 @@ const createInboundMaterialFromShipment = (shipment, lc) => {
   };
 };
 
+const isReadyMadeItemType = (itemType = '') => itemType === 'Blank Card';
+
+const buildReadyMadeSubBox = (box, material, idx) => ({
+  id: Date.now() + idx + Math.random(),
+  inbound_material_id: material.id,
+  shipment_id: material.shipment_id,
+  lc_id: material.lc_id,
+  lc_number: material.lc_number,
+  shipment_number: material.shipment_number,
+  box_id: null,
+  sourceType: 'ready_made',
+  output_type: 'Good/ QC Approved',
+  quantity: box.quantity,
+  box_type: 'Full',
+  is_closed: true,
+  barcode: box.barcode,
+  sub_box_name: box.box_name,
+  box_name: box.box_name,
+  target_per_box: box.quantity,
+  remarks: box.remarks || '',
+  delivery_status: 'delivery_pending',
+  challan_status: null,
+  challan_no: null,
+  challan_date: null,
+  challan_prepared_by: null,
+  challan_item_name: null,
+  challan_item_description: null,
+  challan_remarks: null,
+  client_rejected_count: 0,
+  production_date: null,
+  shift: null,
+  created_by: 'Warehouse Staff',
+  created_at: new Date().toISOString(),
+});
+
 const INITIAL_INBOUND_MATERIALS = INITIAL_LCS.flatMap(lc =>
   lc.shipments
     .filter(s => {
@@ -531,9 +566,12 @@ const handleSaveAssignments = (assignments) => {
       }))
     );
 
-    // Create boxes ONLY for this batch (batch_boxes contains only the newly confirmed ones)
+    // Create material boxes only for production-bound items in this batch.
     if (receiptData.auto_create_boxes && receiptData.batch_boxes?.length > 0) {
-      const newBoxes = receiptData.batch_boxes.map((box, idx) => ({
+      const materialBoxes = receiptData.batch_boxes.filter(box => !isReadyMadeItemType(box.item_type));
+      const readyMadeBoxes = receiptData.batch_boxes.filter(box => isReadyMadeItemType(box.item_type));
+
+      const newBoxes = materialBoxes.map((box, idx) => ({
         id: Date.now() + idx + Math.random(),
         inbound_material_id: material.id,
         shipment_id:         material.shipment_id,
@@ -553,7 +591,17 @@ const handleSaveAssignments = (assignments) => {
         created_at:          new Date().toISOString(),
         updated_at:          new Date().toISOString(),
       }));
-      setBoxes(prev => [...prev, ...newBoxes]);
+
+      if (newBoxes.length > 0) {
+        setBoxes(prev => [...prev, ...newBoxes]);
+      }
+
+      if (readyMadeBoxes.length > 0) {
+        const newSubBoxes = readyMadeBoxes.map((box, idx) =>
+          buildReadyMadeSubBox(box, material, idx)
+        );
+        setSubBoxes(prev => [...prev, ...newSubBoxes]);
+      }
     }
 
     // Stay on inbound receiving page if partially received so manager can do next batch
@@ -645,6 +693,10 @@ const handleSaveAssignments = (assignments) => {
     ...subBoxData,
     id: Date.now() + Math.random(), // unique id for each box in bulk
     box_id: subBoxData.box_id || null,
+    sourceType: subBoxData.sourceType || 'production',
+    lc_number: subBoxData.lc_number || null,
+    delivery_status: subBoxData.delivery_status || 'delivery_pending',
+    challan_status: subBoxData.challan_status || null,
     created_at: new Date().toISOString()
   };
   setSubBoxes(prev => [...prev, newSubBox]);
@@ -808,6 +860,28 @@ const handleDispatchChallan = (subBoxIds, challanPatch) => {
   setSubBoxes(prev => prev.map(sb =>
     subBoxIds.includes(sb.id) ? { ...sb, ...challanPatch } : sb
   ));
+};
+
+const handleMarkChallanDelivered = (challanNo) => {
+  setSubBoxes(prev => prev.map(sb =>
+    sb.challan_no === challanNo
+      ? { ...sb, delivery_status: 'delivered', challan_status: 'delivered' }
+      : sb
+  ));
+
+  setSelectedChallan(prev =>
+    prev?.challan_no === challanNo
+      ? {
+          ...prev,
+          status: 'delivered',
+          boxes: prev.boxes.map(box => ({
+            ...box,
+            delivery_status: 'delivered',
+            challan_status: 'delivered',
+          })),
+        }
+      : prev
+  );
 };
 
 const handlePaymentSave = (finKey, payments) => {
@@ -1017,6 +1091,7 @@ case 'shift-assignment':
             material={selectedMaterial}
             lcs={lcs}
             boxes={boxes}
+            subBoxes={subBoxes}
             onBack={() => navigate('inbound-list')}
           />
         ) : null;
@@ -1226,6 +1301,7 @@ case 'profitability':
   return (
     <DeliveredGoods
       subBoxes={subBoxes}
+      onMarkDelivered={handleMarkChallanDelivered}
       onViewChallan={(challan) => {
         setSelectedChallan(challan);
         navigate('challan-detail');
@@ -1237,6 +1313,7 @@ case 'challan-detail':
   return selectedChallan ? (
     <ChallanDetail
       challan={selectedChallan}
+      onMarkDelivered={handleMarkChallanDelivered}
       onBack={() => navigate('delivered-goods')}
     />
   ) : null;

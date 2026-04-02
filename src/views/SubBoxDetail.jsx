@@ -85,6 +85,8 @@ function fmtDate(val) {
 function openPrintWindow(subBox, lc, shipmentNumber) {
   const src  = barcodeBase64(subBox.barcode);
   const good = subBox.output_type === 'Good/ QC Approved';
+  const dateLabel = fmtDate(subBox.production_date) || subBox.production_date || '—';
+  const shiftLabel = subBox.shift ? `${subBox.shift}` : 'Ready Made';
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/>
 <title>Sub-Box Label</title>
 <style>
@@ -107,11 +109,11 @@ function openPrintWindow(subBox, lc, shipmentNumber) {
   <span class="badge">${subBox.output_type}</span>
   <img class="bc" src="${src}" alt="${subBox.barcode}" />
   <div class="row">
-    <span>Date: <b>${fmtDate(subBox.production_date) || subBox.production_date}</b></span>
-    <span>Shift: <b>${subBox.shift}</b></span>
+    <span>Date: <b>${dateLabel}</b></span>
+    <span>Shift: <b>${shiftLabel}</b></span>
     <span>Qty: <b>${(subBox.quantity || 0).toLocaleString()}</b></span>
   </div>
-  ${shipmentNumber ? `<div class="row"><span>Shipment: <b>${shipmentNumber}</b></span>${lc ? `<span>LC: <b>${lc.lc_number}</b></span>` : ''}</div>` : ''}
+  ${shipmentNumber ? `<div class="row"><span>Shipment: <b>${shipmentNumber}</b></span>${lc ? `<span>LC: <b>${lc.lc_number}</b></span>` : subBox.lc_number ? `<span>LC: <b>${subBox.lc_number}</b></span>` : ''}</div>` : ''}
 </div>
 <script>window.onload=function(){setTimeout(function(){window.print();},500);};<\/script>
 </body></html>`;
@@ -148,6 +150,7 @@ function Node({ icon: Icon, color, title, subtitle, isLast = false, isPending = 
 // Props: subBox, box (direct box_id link), boxes (all boxes), lcs, inboundMaterials, clientRejections, onBack
 const SubBoxDetail = ({ subBox, box: directBox, boxes, lcs, inboundMaterials, clientRejections, onBack }) => {
   const isGood           = subBox.output_type === 'Good/ QC Approved';
+  const isReadyMade      = subBox.sourceType === 'ready_made';
   const totalRejected    = subBox.client_rejected_count || 0;
   const goodQuantity     = subBox.quantity - totalRejected;
   const rejectionPercent = subBox.quantity > 0 ? ((totalRejected / subBox.quantity) * 100).toFixed(1) : 0;
@@ -162,7 +165,7 @@ const SubBoxDetail = ({ subBox, box: directBox, boxes, lcs, inboundMaterials, cl
 
   let trackedBox = directBox || null;
 
-  if (!trackedBox && boxes && subBox.shift && subBox.production_date) {
+  if (!trackedBox && !isReadyMade && boxes && subBox.shift && subBox.production_date) {
     // Find any box issued on the same date and shift
     const prodDate = subBox.production_date; // "YYYY-MM-DD"
     trackedBox = boxes.find(b =>
@@ -181,9 +184,11 @@ const SubBoxDetail = ({ subBox, box: directBox, boxes, lcs, inboundMaterials, cl
   }
 
   // Resolve inboundMaterial from trackedBox
-  const inboundMaterial = trackedBox
-    ? inboundMaterials?.find(im => im.id === trackedBox.inbound_material_id)
-    : null;
+  const inboundMaterial = isReadyMade
+    ? inboundMaterials?.find(im => im.id === subBox.inbound_material_id)
+    : trackedBox
+      ? inboundMaterials?.find(im => im.id === trackedBox.inbound_material_id)
+      : null;
 
   // Resolve LC + shipment
   let lc = null, shipment = null;
@@ -194,7 +199,7 @@ const SubBoxDetail = ({ subBox, box: directBox, boxes, lcs, inboundMaterials, cl
     }
   }
 
-  const shipmentNumber = inboundMaterial?.shipment_number || shipment?.shipment_number || null;
+  const shipmentNumber = subBox.shipment_number || inboundMaterial?.shipment_number || shipment?.shipment_number || null;
 
   const challan = subBox.challan_document || null;
   const formatFileSize = (b) => {
@@ -205,7 +210,7 @@ const SubBoxDetail = ({ subBox, box: directBox, boxes, lcs, inboundMaterials, cl
   };
 
   // Build node subtitles
-  const lcSubtitle  = lc ? lc.lc_number : null;
+  const lcSubtitle  = subBox.lc_number || (lc ? lc.lc_number : null);
   const shipSubtitle = shipmentNumber || null;
 
   // Box node: show the linked box info if found
@@ -215,6 +220,14 @@ const SubBoxDetail = ({ subBox, box: directBox, boxes, lcs, inboundMaterials, cl
 
   // Production node
   const prodSubtitle = `${fmtDate(subBox.production_date)} — ${subBox.shift} Shift`;
+
+  const resolvedBoxSubtitle = isReadyMade
+    ? `${subBox.sub_box_name || subBox.box_name} - inbound ready-made box`
+    : boxSubtitle;
+
+  const resolvedProdSubtitle = isReadyMade
+    ? 'Bypassed production - created directly from inbound receipt'
+    : prodSubtitle;
 
   // Finished good node
   const fgSubtitle = isGood
@@ -256,11 +269,11 @@ const SubBoxDetail = ({ subBox, box: directBox, boxes, lcs, inboundMaterials, cl
         <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
           <div>
             <p className="text-xs text-gray-500 uppercase font-medium mb-1">Production Date</p>
-            <p className="text-sm font-semibold text-gray-900">{fmtDate(subBox.production_date)}</p>
+            <p className="text-sm font-semibold text-gray-900">{subBox.production_date ? fmtDate(subBox.production_date) : '—'}</p>
           </div>
           <div>
             <p className="text-xs text-gray-500 uppercase font-medium mb-1">Shift</p>
-            <p className="text-sm font-semibold text-gray-900">{subBox.shift} Shift</p>
+            <p className="text-sm font-semibold text-gray-900">{subBox.shift ? `${subBox.shift} Shift` : '—'}</p>
           </div>
           <div>
             <p className="text-xs text-gray-500 uppercase font-medium mb-1">Quantity</p>
@@ -274,6 +287,10 @@ const SubBoxDetail = ({ subBox, box: directBox, boxes, lcs, inboundMaterials, cl
               {isGood ? <CheckCircle className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
               {isGood ? 'QC Approved' : 'Wastage'}
             </span>
+          </div>
+          <div>
+            <p className="text-xs text-gray-500 uppercase font-medium mb-1">Source Type</p>
+            <p className="text-sm font-semibold text-gray-900">{isReadyMade ? 'Ready Made' : 'Production'}</p>
           </div>
           {trackedBox && (
             <div>
@@ -291,6 +308,12 @@ const SubBoxDetail = ({ subBox, box: directBox, boxes, lcs, inboundMaterials, cl
             <div>
               <p className="text-xs text-gray-500 uppercase font-medium mb-1">LC</p>
               <p className="text-sm font-semibold text-gray-900">{lc.lc_number}</p>
+            </div>
+          )}
+          {!lc && subBox.lc_number && (
+            <div>
+              <p className="text-xs text-gray-500 uppercase font-medium mb-1">LC</p>
+              <p className="text-sm font-semibold text-gray-900">{subBox.lc_number}</p>
             </div>
           )}
         </div>
@@ -352,7 +375,7 @@ const SubBoxDetail = ({ subBox, box: directBox, boxes, lcs, inboundMaterials, cl
         <p className="text-sm text-gray-400 mb-1">
           Traced via <span className="font-medium text-gray-600">{subBox.shift} Shift · {fmtDate(subBox.production_date)}</span>
         </p>
-        {!trackedBox && (
+        {!trackedBox && !isReadyMade && (
           <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
             No material box was assigned to this shift yet. Issue boxes to production on this shift date to enable full traceability.
           </p>
@@ -363,7 +386,7 @@ const SubBoxDetail = ({ subBox, box: directBox, boxes, lcs, inboundMaterials, cl
             color="blue"
             title="Letter of Credit"
             subtitle={lcSubtitle}
-            isPending={!lc}
+            isPending={!lcSubtitle}
           />
           <Node
             icon={Ship}
@@ -375,15 +398,15 @@ const SubBoxDetail = ({ subBox, box: directBox, boxes, lcs, inboundMaterials, cl
           <Node
             icon={Package}
             color="teal"
-            title="Material Box"
-            subtitle={boxSubtitle}
-            isPending={!trackedBox}
+            title={isReadyMade ? 'Inbound Box' : 'Material Box'}
+            subtitle={resolvedBoxSubtitle}
+            isPending={!resolvedBoxSubtitle}
           />
           <Node
             icon={Factory}
             color="orange"
-            title="Production"
-            subtitle={prodSubtitle}
+            title={isReadyMade ? 'Inbound Conversion' : 'Production'}
+            subtitle={resolvedProdSubtitle}
           />
           <Node
             icon={isGood ? CheckCircle : XCircle}
@@ -407,7 +430,7 @@ const SubBoxDetail = ({ subBox, box: directBox, boxes, lcs, inboundMaterials, cl
       {/* Remarks */}
       {subBox.remarks && (
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <h3 className="text-base font-semibold text-gray-900 mb-3">Production Remarks</h3>
+          <h3 className="text-base font-semibold text-gray-900 mb-3">{isReadyMade ? 'Remarks' : 'Production Remarks'}</h3>
           <div className="bg-gray-50 rounded-lg p-4 border border-gray-100">
             <p className="text-sm text-gray-700 whitespace-pre-wrap">{subBox.remarks}</p>
           </div>

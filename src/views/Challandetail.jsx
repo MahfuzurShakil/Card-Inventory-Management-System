@@ -23,7 +23,7 @@ const InfoItem = ({ label, value, mono = false, icon }) => (
   </div>
 );
 
-const ChallanDetail = ({ challan, onBack }) => {
+const ChallanDetail = ({ challan, onBack, onMarkDelivered }) => {
   const [currentPage, setCurrentPage] = useState(1);
   const ROWS = 10;
 
@@ -35,6 +35,7 @@ const ChallanDetail = ({ challan, onBack }) => {
   const safePage = Math.min(currentPage, totalPages);
   const pageBoxes = boxes.slice((safePage - 1) * ROWS, safePage * ROWS);
   const itemDescription = challan.item_description || challan.remarks;
+  const challanStatus = challan.status || 'pending';
 
   return (
     <div className="space-y-6">
@@ -50,13 +51,25 @@ const ChallanDetail = ({ challan, onBack }) => {
             <div>
               <p className="text-xs font-semibold tracking-[0.2em] uppercase text-gray-400">Challan Details</p>
               <h1 className="text-2xl font-bold text-gray-900 mt-1">{challan.challan_no}</h1>
-              <p className="text-sm text-gray-500 mt-0.5">Delivery challan information and dispatched box list</p>
+              <p className="text-sm text-gray-500 mt-0.5">Delivery challan information and prepared box list</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold bg-emerald-100 text-emerald-800 rounded-full border border-emerald-200">
-              <Truck className="w-4 h-4" /> Dispatched
+            <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold rounded-full border ${
+              challanStatus === 'delivered'
+                ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                : 'bg-amber-100 text-amber-800 border-amber-200'
+            }`}>
+              <Truck className="w-4 h-4" /> {challanStatus === 'delivered' ? 'Delivered' : 'Pending'}
             </span>
+            {challanStatus !== 'delivered' && (
+              <button
+                onClick={() => onMarkDelivered && onMarkDelivered(challan.challan_no)}
+                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-semibold rounded-lg hover:bg-emerald-700 transition-colors"
+              >
+                <Truck className="w-4 h-4" /> Mark Delivered
+              </button>
+            )}
             <button
               onClick={() => openChallanPrint(challan, boxes)}
               className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white text-sm font-semibold rounded-lg hover:bg-gray-700 transition-colors"
@@ -79,8 +92,10 @@ const ChallanDetail = ({ challan, onBack }) => {
                 <Truck className="w-3.5 h-3.5 text-gray-400" />
                 Status
               </p>
-              <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-800">
-                <Truck className="w-3 h-3" /> Dispatched
+              <span className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-full ${
+                challanStatus === 'delivered' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+              }`}>
+                <Truck className="w-3 h-3" /> {challanStatus === 'delivered' ? 'Delivered' : 'Pending'}
               </span>
             </div>
           </div>
@@ -99,7 +114,7 @@ const ChallanDetail = ({ challan, onBack }) => {
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
           <div>
-            <h3 className="text-base font-semibold text-gray-900">Dispatched Boxes</h3>
+            <h3 className="text-base font-semibold text-gray-900">{challanStatus === 'delivered' ? 'Delivered Boxes' : 'Ready-for-Delivery Boxes'}</h3>
             <p className="text-sm text-gray-500 mt-0.5">{boxes.length} sub-boxes in this challan</p>
           </div>
           <button
@@ -148,12 +163,12 @@ const ChallanDetail = ({ challan, onBack }) => {
                     </td>
                     <td className="px-6 py-4">
                       <span className={`inline-flex items-center px-2 py-0.5 text-xs font-semibold rounded-full ${
-                        box.shift === 'Day' ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700'
+                        box.shift === 'Day' ? 'bg-amber-100 text-amber-700' : box.shift === 'Night' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-200 text-gray-700'
                       }`}>
-                        {box.shift}
+                        {box.shift || 'Ready Made'}
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-gray-600 text-sm">{fmtDate(box.production_date)}</td>
+                    <td className="px-6 py-4 text-gray-600 text-sm">{box.production_date ? fmtDate(box.production_date) : '—'}</td>
                     <td className="px-6 py-4 text-right font-semibold text-gray-900">
                       {(box.quantity || 0).toLocaleString()}
                     </td>

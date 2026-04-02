@@ -489,12 +489,13 @@ const statusCfg = {
   'Material In Stock':      { icon: CheckCircle, bg: 'bg-green-100',  tx: 'text-green-700',  label: 'In Stock'      },
   'Material In Production': { icon: Activity,    bg: 'bg-blue-100',   tx: 'text-blue-700',   label: 'In Production' },
   'Consumed':               { icon: XCircle,     bg: 'bg-gray-100',   tx: 'text-gray-500',   label: 'Consumed'      },
+  'Ready Made Received':    { icon: CheckCircle, bg: 'bg-cyan-100',   tx: 'text-cyan-700',   label: 'Ready Made'    },
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════════
-const InboundShipmentBoxes = ({ material, lcs, boxes: allBoxes, onBack }) => {
+const InboundShipmentBoxes = ({ material, lcs, boxes: allBoxes, subBoxes: allSubBoxes, onBack }) => {
   const [currentPage,  setCurrentPage]  = useState(1);
   const [selectedIds,  setSelectedIds]  = useState([]);
   const [remarksBox,   setRemarksBox]   = useState(null);
@@ -511,9 +512,32 @@ const InboundShipmentBoxes = ({ material, lcs, boxes: allBoxes, onBack }) => {
   const realBoxes = (allBoxes || []).filter(
     b => b.inbound_material_id === material?.id || b.shipment_id === material?.shipment_id
   );
+  const readyMadeBoxes = (allSubBoxes || [])
+    .filter(sb =>
+      sb.sourceType === 'ready_made' &&
+      (sb.inbound_material_id === material?.id || sb.shipment_id === material?.shipment_id)
+    )
+    .map(sb => ({
+      id:                     sb.id,
+      box_name:               sb.box_name || sb.sub_box_name,
+      sub_box_name:           sb.sub_box_name || sb.box_name,
+      barcode:                sb.barcode,
+      item_name:              sb.item_name || sb.item_type || 'Blank Card',
+      item_type:              sb.item_type || 'Blank Card',
+      quantity:               sb.quantity,
+      status:                 'Ready Made Received',
+      consumed_quantity:      0,
+      production_missing_qty: 0,
+      production_extra_qty:   0,
+      missing_qty:            0,
+      extra_qty:              0,
+      reconciliation_notes:   [],
+      remarks:                sb.remarks || '',
+      sourceType:             sb.sourceType,
+    }));
   const warehouseItems = shipment?.stepData?.warehouse?.items || [];
-  const derivedBoxes = realBoxes.length > 0
-    ? realBoxes
+  const derivedBoxes = (realBoxes.length > 0 || readyMadeBoxes.length > 0)
+    ? [...realBoxes, ...readyMadeBoxes]
     : warehouseItems.flatMap(item =>
         (item.boxes || []).map(box => ({
           ...box,
@@ -685,6 +709,7 @@ const InboundShipmentBoxes = ({ material, lcs, boxes: allBoxes, onBack }) => {
                         (box.item_name || box.item_type || '').toLowerCase().includes('chip')  ? 'bg-blue-100 text-blue-800'   :
                         (box.item_name || box.item_type || '').toLowerCase().includes('tape')  ? 'bg-purple-100 text-purple-800':
                         (box.item_name || box.item_type || '').toLowerCase().includes('sheet') ? 'bg-green-100 text-green-800'  :
+                        (box.item_name || box.item_type || '').toLowerCase().includes('blank card') ? 'bg-cyan-100 text-cyan-800' :
                         'bg-gray-100 text-gray-700'
                       }`}>
                         {box.item_name || box.item_type || '—'}
