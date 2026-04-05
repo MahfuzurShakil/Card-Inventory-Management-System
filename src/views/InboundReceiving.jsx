@@ -3,6 +3,7 @@ import {
   Package, ChevronRight, ChevronDown, CheckCircle, CheckSquare, Square,
   Printer, AlertTriangle, SkipForward
 } from 'lucide-react';
+import { createMaterialBarcode } from '../utils/barcode';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // CODE 128 BARCODE ENGINE
@@ -333,6 +334,8 @@ const InboundReceiving = ({ material, lc, onSave, onBack, onComplete }) => {
 
   const buildSelectedBoxData = () => {
     const result = [];
+    const batchDate = new Date();
+    let sequence = 1;
     Object.keys(selectedKeys).forEach(key => {
       if (!selectedKeys[key]) return;
       const [itemIdx, boxIdx] = key.split('-').map(Number);
@@ -344,6 +347,7 @@ const InboundReceiving = ({ material, lc, onSave, onBack, onComplete }) => {
       const prodExtra = s.prod_extra_qty || 0;
       result.push({
         key,
+        shipment_number: material?.shipment_number || null,
         box_name:       box.box_name,
         item_name:      item.item_type || item.item_name,
         item_type:      item.item_type || item.item_name,
@@ -351,7 +355,7 @@ const InboundReceiving = ({ material, lc, onSave, onBack, onComplete }) => {
         missing_qty:    missing,
         prod_extra_qty: prodExtra,
         remarks:        s.remarks || '',
-        barcode:        box.barcode || `BC-${Date.now()}-${itemIdx}-${boxIdx}`,
+        barcode:        box.barcode || createMaterialBarcode(sequence++, batchDate),
       });
     });
     return result;

@@ -192,7 +192,13 @@ const SubBoxDetail = ({ subBox, box: directBox, boxes, lcs, inboundMaterials, cl
 
   // Resolve LC + shipment
   let lc = null, shipment = null;
-  if (inboundMaterial && lcs) {
+  if (subBox.shipment_id && lcs) {
+    for (const cur of lcs) {
+      const found = cur.shipments?.find(s => s.id === subBox.shipment_id);
+      if (found) { lc = cur; shipment = found; break; }
+    }
+  }
+  if (!shipment && inboundMaterial && lcs) {
     for (const cur of lcs) {
       const found = cur.shipments?.find(s => s.id === inboundMaterial.shipment_id);
       if (found) { lc = cur; shipment = found; break; }

@@ -4,6 +4,7 @@ import {
   CheckCircle, XCircle, Package, Printer, AlertCircle,
   Layers, X, AlertTriangle, Info, Lock
 } from 'lucide-react';
+import { createProductionBarcode, normalizeShipmentCode } from '../utils/barcode';
 
 // ── Code 128B engine ──────────────────────────────────────────────────────────
 const C128 = [
@@ -86,9 +87,6 @@ function generateSubBoxName(seq, date, shift, outputType) {
   return `SB-${dateStr}-${shiftCode}${typeCode}-${String(seq).padStart(3, '0')}`;
 }
 
-function generateBarcode() {
-  return `SB-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
-}
 
 // ── Print window ──────────────────────────────────────────────────────────────
 function openPrintWindow(boxes) {
@@ -271,6 +269,7 @@ const SubBoxCreation = ({
   onSave,           // (boxData) => void  — called for each NEW box created
   onUpdateSubBox,   // (id, patch) => void — called when updating existing partial box
   onBack,
+  boxes = [],
   subBoxes = [],    // all existing sub-boxes
   shiftSummaries = [], // [{date, shift, qc_good, wastage, ...}]
 }) => {
@@ -313,15 +312,55 @@ const SubBoxCreation = ({
   // Final total quantity to work with (summary or manual override)
   const totalQty = manualQtyOverride !== '' ? (parseInt(manualQtyOverride) || 0) : summaryQty;
 
+  const shiftChipBoxes = useMemo(
+    () => boxes.filter((box) => {
+      const itemType = (box.item_type || box.item_name || '').toLowerCase();
+      return itemType === 'chip' &&
+        box.issue_date === formData.production_date &&
+        box.issue_shift === formData.shift;
+    }),
+    [boxes, formData.production_date, formData.shift]
+  );
+
+  const shipmentContext = useMemo(() => {
+    const shipments = shiftChipBoxes.reduce((acc, box) => {
+      const key = box.shipment_id ?? box.shipment_number;
+      if (key == null) return acc;
+
+      if (!acc.some((entry) => entry.key === key)) {
+        acc.push({
+          key,
+          shipment_id: box.shipment_id ?? null,
+          shipment_number: box.shipment_number || null,
+        });
+      }
+
+      return acc;
+    }, []);
+
+    return {
+      chipBoxCount: shiftChipBoxes.length,
+      hasAnyChipBoxes: shiftChipBoxes.length > 0,
+      shipments,
+      isMixed: shipments.length > 1,
+      selected: shipments.length === 1 ? shipments[0] : null,
+    };
+  }, [shiftChipBoxes]);
+
   // ── Open partial box (Good type only — wastage never has partials) ─────────
   // There should be at most ONE open partial for Good output. We enforce this.
   const openPartialBox = useMemo(
     () => subBoxes.find(sb =>
-      sb.box_type    === 'Partial' &&
+      sb.box_type === 'Partial' &&
       sb.output_type === 'Good/ QC Approved' &&
-      !sb.is_closed
+      !sb.is_closed &&
+      shipmentContext.selected &&
+      (
+        (sb.shipment_id != null && sb.shipment_id === shipmentContext.selected.shipment_id) ||
+        (!!sb.shipment_number && sb.shipment_number === shipmentContext.selected.shipment_number)
+      )
     ) || null,
-    [subBoxes]
+    [subBoxes, shipmentContext.selected]
   );
 
   // ── How many Good units already boxed for this date+shift ─────────────────
@@ -332,13 +371,32 @@ const SubBoxCreation = ({
       .filter(sb =>
         sb.production_date === formData.production_date &&
         sb.shift           === formData.shift &&
-        sb.output_type     === 'Good/ QC Approved'
+        sb.output_type     === 'Good/ QC Approved' &&
+        shipmentContext.selected &&
+        (
+          (sb.shipment_id != null && sb.shipment_id === shipmentContext.selected.shipment_id) ||
+          (!!sb.shipment_number && sb.shipment_number === shipmentContext.selected.shipment_number)
+        )
       )
       .reduce((sum, sb) => sum + (sb.quantity || 0), 0);
-  }, [subBoxes, formData.production_date, formData.shift, isGood]);
+  }, [subBoxes, formData.production_date, formData.shift, isGood, shipmentContext.selected]);
 
   // Units still needing to be boxed this session
   const qtyToBox = Math.max(0, totalQty - alreadyBoxedQty);
+
+  const nextBarcodeSequence = useMemo(() => {
+    if (!shipmentContext.selected) return 1;
+
+    return subBoxes.filter(sb =>
+      sb.sourceType === 'production' &&
+      sb.output_type === formData.output_type &&
+      !!sb.barcode &&
+      (
+        (sb.shipment_id != null && sb.shipment_id === shipmentContext.selected.shipment_id) ||
+        (!!sb.shipment_number && sb.shipment_number === shipmentContext.selected.shipment_number)
+      )
+    ).length + 1;
+  }, [subBoxes, shipmentContext.selected, formData.output_type]);
 
   // ── Next available sequence number for this date+shift+type ──────────────
   const nextSeq = useMemo(() => {
@@ -403,7 +461,11 @@ const SubBoxCreation = ({
     return plan;
   }, [qtyToBox, perBoxQty, nextSeq, openPartialBox, isGood]);
 
-  const isReady = qtyToBox > 0 && perBoxQty > 0 && formData.production_date;
+  const isReady = qtyToBox > 0 &&
+    perBoxQty > 0 &&
+    formData.production_date &&
+    shipmentContext.hasAnyChipBoxes &&
+    !shipmentContext.isMixed;
 
   // ── Handlers ─────────────────────────────────────────────────────────────
   const handleChange = (field, value) => {
@@ -414,6 +476,11 @@ const SubBoxCreation = ({
   const validate = () => {
     const errs = {};
     if (!formData.production_date) errs.production_date = 'Date is required';
+    if (!shipmentContext.hasAnyChipBoxes) {
+      errs.shipment = 'No chip boxes were issued to this production date and shift. Issue chip boxes first to resolve the shipment.';
+    } else if (shipmentContext.isMixed) {
+      errs.shipment = 'Chip boxes from multiple shipments are assigned to this shift. Separate them by shipment before generating QC or WST sub-box barcodes.';
+    }
     if (totalQty <= 0) {
       errs.qty = !shiftSummary
         ? 'No shift summary found. Go to Production Floor and save a summary first, or enter quantity manually.'
@@ -429,11 +496,16 @@ const SubBoxCreation = ({
 
   // Close partial as final (generate barcode now at current unit count)
   const handleClosePartial = () => {
-    if (!openPartialBox || !onUpdateSubBox) return;
+    if (!openPartialBox || !onUpdateSubBox || !shipmentContext.selected) return;
     const patch = {
       box_type:  'Full',
       is_closed: true,
-      barcode:   generateBarcode(),
+      barcode:   createProductionBarcode({
+        outputType: openPartialBox.output_type,
+        shipmentNumber: shipmentContext.selected.shipment_number,
+        shipmentId: shipmentContext.selected.shipment_id,
+        sequence: nextBarcodeSequence,
+      }),
       updated_at: new Date().toISOString(),
     };
     onUpdateSubBox(openPartialBox.id, patch);
@@ -444,8 +516,11 @@ const SubBoxCreation = ({
     e.preventDefault();
     if (!validate()) return;
     if (!boxPlan) return;
+    if (!shipmentContext.selected) return;
 
     const result = { filledPartial: null, newFullBoxes: [], newPartialBox: null };
+    const barcodeDate = new Date();
+    let barcodeSequence = nextBarcodeSequence;
 
     // --- Handle partial fill ---
     if (boxPlan.filledPartial && onUpdateSubBox) {
@@ -456,7 +531,13 @@ const SubBoxCreation = ({
         ...(nowFull && {
           box_type:  'Full',
           is_closed: true,
-          barcode:   generateBarcode(),
+          barcode:   createProductionBarcode({
+            outputType: box.output_type,
+            shipmentNumber: shipmentContext.selected.shipment_number,
+            shipmentId: shipmentContext.selected.shipment_id,
+            sequence: barcodeSequence++,
+            date: barcodeDate,
+          }),
         }),
       };
       onUpdateSubBox(box.id, patch);
@@ -471,10 +552,18 @@ const SubBoxCreation = ({
         shift:                 formData.shift,
         output_type:           formData.output_type,
         sourceType:            'production',
+        shipment_id:           shipmentContext.selected.shipment_id,
+        shipment_number:       shipmentContext.selected.shipment_number,
         quantity,
         box_type:              'Full',
         is_closed:             true,
-        barcode:               generateBarcode(),
+        barcode:               createProductionBarcode({
+          outputType: formData.output_type,
+          shipmentNumber: shipmentContext.selected.shipment_number,
+          shipmentId: shipmentContext.selected.shipment_id,
+          sequence: barcodeSequence++,
+          date: barcodeDate,
+        }),
         sub_box_name,
         box_name:              sub_box_name,
         target_per_box:        perBoxQty,
@@ -498,6 +587,8 @@ const SubBoxCreation = ({
         shift:                 formData.shift,
         output_type:           formData.output_type,
         sourceType:            'production',
+        shipment_id:           shipmentContext.selected.shipment_id,
+        shipment_number:       shipmentContext.selected.shipment_number,
         quantity,
         box_type:              'Partial',
         is_closed:             false,
@@ -526,6 +617,11 @@ const SubBoxCreation = ({
     ? boxPlan.newFull.slice(0, 4).map(({ seq }) =>
         generateSubBoxName(seq, formData.production_date, formData.shift, formData.output_type))
     : [];
+
+  const shipmentLabel = shipmentContext.selected?.shipment_number || '—';
+  const shipmentCode = shipmentContext.selected
+    ? normalizeShipmentCode(shipmentContext.selected.shipment_number, shipmentContext.selected.shipment_id)
+    : '—';
 
   return (
     <div className="space-y-5">
@@ -677,6 +773,43 @@ const SubBoxCreation = ({
                 </div>
               </div>
 
+              <div className={`mb-4 px-4 py-3 rounded-xl border text-xs ${
+                shipmentContext.selected ? 'bg-blue-50 border-blue-200 text-blue-800'
+                : shipmentContext.isMixed ? 'bg-red-50 border-red-200 text-red-800'
+                : 'bg-gray-50 border-gray-200 text-gray-600'
+              }`}>
+                <div className="flex items-start gap-2">
+                  <Layers className={`w-4 h-4 flex-shrink-0 mt-0.5 ${
+                    shipmentContext.selected ? 'text-blue-600'
+                    : shipmentContext.isMixed ? 'text-red-500'
+                    : 'text-gray-400'
+                  }`} />
+                  <div>
+                    {shipmentContext.selected ? (
+                      <>
+                        <span className="font-semibold">Shipment resolved â€” </span>
+                        {shipmentLabel} · barcode code <span className="font-mono font-bold">{shipmentCode}</span> · {shipmentContext.chipBoxCount} chip box{shipmentContext.chipBoxCount !== 1 ? 'es' : ''} issued to this shift.
+                      </>
+                    ) : shipmentContext.isMixed ? (
+                      <>
+                        <span className="font-semibold">Mixed shipment issue detected.</span> This shift contains chip boxes from multiple shipments, so QC/WST barcode generation is blocked until the boxes are separated by shipment.
+                      </>
+                    ) : (
+                      <>
+                        <span className="font-semibold">Shipment not resolved yet.</span> Issue chip boxes to this shift first so the QC/WST barcode can inherit the correct shipment code.
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {errors.shipment && (
+                <div className="mb-4 flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-xl">
+                  <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-red-700">{errors.shipment}</p>
+                </div>
+              )}
+
               {errors.qty && (
                 <div className="mb-4 flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-xl">
                   <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
@@ -816,6 +949,8 @@ const SubBoxCreation = ({
                 {[
                   ['Date',          formData.production_date || '—'],
                   ['Shift',         formData.shift],
+                  ['Shipment',      shipmentLabel],
+                  ['Ship code',     shipmentCode],
                   [summaryLabel,    totalQty > 0 ? `${totalQty.toLocaleString()} units` : '—'],
                   ['Already boxed', isGood && alreadyBoxedQty > 0 ? `${alreadyBoxedQty.toLocaleString()} units` : '—'],
                   ['To box now',    qtyToBox > 0 ? `${qtyToBox.toLocaleString()} units` : '—'],

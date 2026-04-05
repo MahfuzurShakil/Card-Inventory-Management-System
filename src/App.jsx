@@ -1002,6 +1002,7 @@ const handleSaveAssignments = (assignments) => {
         id: Date.now() + idx + Math.random(),
         inbound_material_id: material.id,
         shipment_id:         material.shipment_id,
+        shipment_number:     box.shipment_number || material.shipment_number,
         box_name:            box.box_name,
         item_name:           box.item_name,
         item_type:           box.item_type,
@@ -1635,6 +1636,7 @@ case 'subbox-creation':
       onSave={handleSaveSubBox}
       onUpdateSubBox={handleUpdateSubBox}
       onBack={() => navigate('subbox-list')}
+      boxes={boxes}
       subBoxes={subBoxes}
       shiftSummaries={shiftSummaries}
     />

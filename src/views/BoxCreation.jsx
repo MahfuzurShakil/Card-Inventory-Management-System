@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { ChevronRight, Save, Package, Hash, Barcode, Plus, X, AlertCircle } from 'lucide-react';
+import { createMaterialBarcode } from '../utils/barcode';
 
 const BoxCreation = ({ inboundMaterials, onSave, onBack }) => {
   const [selectedInbound, setSelectedInbound] = useState('');
@@ -103,13 +104,15 @@ const BoxCreation = ({ inboundMaterials, onSave, onBack }) => {
     e.preventDefault();
     
     if (validateForm()) {
+      const batchDate = new Date();
       const boxesData = boxes.map((box, index) => ({
         inbound_material_id: parseInt(selectedInbound),
         shipment_id: inboundRecord.shipment_id,
+        shipment_number: inboundRecord.shipment_number,
         box_name: box.box_name,
         item_name: box.item_name,
         quantity: box.quantity,
-        barcode: `BC-${Date.now()}-${index}`, // Generate unique barcode
+        barcode: createMaterialBarcode(index + 1, batchDate),
         csv_file_name: inboundRecord.csv_file_name,
         status: 'Material In Stock',
         created_by: 'Store Keeper', // In real app, get from auth context

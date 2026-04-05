@@ -2,8 +2,7 @@ const COMPANY = {
   name: 'Onestra Ltd.',
   address: 'Dhaka, Bangladesh',
   phone: '+880 1XXXXXXXXX',
-  email: 'info@quintusgroup.org',
-  website: 'quintusgroup.org/onestra-ltd',
+  email: 'info@onestra.com',
 };
 
 function escapeHtml(value) {
@@ -63,8 +62,8 @@ function buildChallanHtml(challanData, items = []) {
       <div class="co-name">${escapeHtml(COMPANY.name)}</div>
       <div class="co-meta">
         ${escapeHtml(COMPANY.address)}<br/>
-        ${escapeHtml(COMPANY.phone)} &nbsp;&nbsp; ${escapeHtml(COMPANY.email)}<br/>
-        ${escapeHtml(COMPANY.website)}
+        ${escapeHtml(COMPANY.phone)}<br/>
+        ${escapeHtml(COMPANY.email)}
       </div>
     </div>
     <div class="ch-badge">
@@ -83,12 +82,10 @@ function buildChallanHtml(challanData, items = []) {
       <div class="meta-box">
         <div class="meta-label">Number of Box</div>
         <div class="meta-value">${items.length}</div>
-        <div class="meta-sub">boxes dispatched</div>
       </div>
       <div class="meta-box">
         <div class="meta-label">Total Quantity</div>
-        <div class="meta-value">${formatNumber(totalQty)}</div>
-        <div class="meta-sub">units</div>
+        <div class="meta-value">${formatNumber(totalQty)} units</div>
       </div>
     </div>
     ${itemDescription ? `

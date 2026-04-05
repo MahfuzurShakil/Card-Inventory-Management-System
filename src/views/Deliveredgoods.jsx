@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import {
   Truck, Search, Eye, Download, FileText, Package,
   Calendar, User, ChevronLeft, ChevronRight,
-  Layers, X
+  Layers, X, AlertTriangle
 } from 'lucide-react';
 import { openChallanPrint } from '../utils/challanPrint';
 
@@ -43,10 +43,46 @@ function buildChallans(subBoxes) {
   });
 }
 
+const DeliveryConfirmModal = ({ challanNo, onCancel, onConfirm }) => (
+  <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+    <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-gray-200 overflow-hidden">
+      <div className="px-6 py-5 border-b border-gray-100 flex items-start gap-3">
+        <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
+          <AlertTriangle className="w-5 h-5 text-amber-600" />
+        </div>
+        <div>
+          <h3 className="text-lg font-bold text-gray-900">Confirm Delivery</h3>
+          <p className="text-sm text-gray-500 mt-1">
+            Mark challan <span className="font-mono font-semibold text-gray-700">{challanNo}</span> as delivered?
+          </p>
+        </div>
+      </div>
+      <div className="px-6 py-4 bg-gray-50 text-sm text-gray-600">
+        This will change the challan status from pending to delivered.
+      </div>
+      <div className="px-6 py-4 flex items-center justify-end gap-3">
+        <button
+          onClick={onCancel}
+          className="px-4 py-2 text-sm font-semibold text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={onConfirm}
+          className="px-4 py-2 text-sm font-semibold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors"
+        >
+          Confirm Delivery
+        </button>
+      </div>
+    </div>
+  </div>
+);
+
 const DeliveredGoods = ({ subBoxes = [], onViewChallan, onMarkDelivered }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [dateFilter, setDateFilter] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
+  const [confirmChallanNo, setConfirmChallanNo] = useState(null);
   const ROWS = 10;
 
   const challans = useMemo(() => buildChallans(subBoxes), [subBoxes]);
@@ -64,12 +100,14 @@ const DeliveredGoods = ({ subBoxes = [], onViewChallan, onMarkDelivered }) => {
   const safePage = Math.min(currentPage, totalPages);
   const pageRows = filtered.slice((safePage - 1) * ROWS, safePage * ROWS);
 
-  const totalBoxes = challans.reduce((sum, challan) => sum + challan.boxes.length, 0);
-  const totalUnits = challans.reduce(
-    (sum, challan) => sum + challan.boxes.reduce((inner, box) => inner + (box.quantity || 0), 0),
-    0
-  );
-  const averageBoxesPerChallan = challans.length > 0 ? (totalBoxes / challans.length).toFixed(1) : '0.0';
+  const pendingChallansCount = challans.filter(challan => challan.status !== 'delivered').length;
+  const deliveredChallansCount = challans.filter(challan => challan.status === 'delivered').length;
+  const deliveredBoxesCount = challans
+    .filter(challan => challan.status === 'delivered')
+    .reduce((sum, challan) => sum + challan.boxes.length, 0);
+  const deliveredUnitsCount = challans
+    .filter(challan => challan.status === 'delivered')
+    .reduce((sum, challan) => sum + challan.boxes.reduce((inner, box) => inner + (box.quantity || 0), 0), 0);
 
   const handleClearFilters = () => {
     setSearchTerm('');
@@ -79,8 +117,23 @@ const DeliveredGoods = ({ subBoxes = [], onViewChallan, onMarkDelivered }) => {
 
   const hasFilters = searchTerm || dateFilter;
 
+  const handleConfirmDelivered = () => {
+    if (confirmChallanNo && onMarkDelivered) {
+      onMarkDelivered(confirmChallanNo);
+    }
+    setConfirmChallanNo(null);
+  };
+
   return (
     <div className="space-y-6">
+      {confirmChallanNo && (
+        <DeliveryConfirmModal
+          challanNo={confirmChallanNo}
+          onCancel={() => setConfirmChallanNo(null)}
+          onConfirm={handleConfirmDelivered}
+        />
+      )}
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Delivered Goods</h1>
@@ -94,7 +147,7 @@ const DeliveredGoods = ({ subBoxes = [], onViewChallan, onMarkDelivered }) => {
             <div>
               <p className="text-xs font-medium text-gray-500">Total Challans</p>
               <p className="text-2xl font-bold text-gray-900 mt-1">{challans.length}</p>
-              <p className="text-xs text-gray-400 mt-0.5">prepared or delivered</p>
+              <p className="text-xs text-gray-400 mt-0.5">all challan records</p>
             </div>
             <div className="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center">
               <FileText className="w-5 h-5 text-indigo-600" />
@@ -105,38 +158,38 @@ const DeliveredGoods = ({ subBoxes = [], onViewChallan, onMarkDelivered }) => {
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-xs font-medium text-gray-500">Boxes on Challans</p>
-              <p className="text-2xl font-bold text-gray-900 mt-1">{totalBoxes.toLocaleString()}</p>
-              <p className="text-xs text-gray-400 mt-0.5">sub-boxes total</p>
-            </div>
-            <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-              <Package className="w-5 h-5 text-blue-600" />
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium text-gray-500">Units on Challans</p>
-              <p className="text-2xl font-bold text-gray-900 mt-1">{totalUnits.toLocaleString()}</p>
-              <p className="text-xs text-gray-400 mt-0.5">across all challans</p>
-            </div>
-            <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center">
-              <Layers className="w-5 h-5 text-emerald-600" />
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium text-gray-500">Avg. Boxes / Challan</p>
-              <p className="text-2xl font-bold text-gray-900 mt-1">{averageBoxesPerChallan}</p>
-              <p className="text-xs text-gray-400 mt-0.5">per active challan</p>
+              <p className="text-xs font-medium text-gray-500">Pending Challans</p>
+              <p className="text-2xl font-bold text-gray-900 mt-1">{pendingChallansCount}</p>
+              <p className="text-xs text-gray-400 mt-0.5">awaiting delivery</p>
             </div>
             <div className="w-10 h-10 bg-amber-100 rounded-lg flex items-center justify-center">
-              <Package className="w-5 h-5 text-amber-600" />
+              <Truck className="w-5 h-5 text-amber-600" />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs font-medium text-gray-500">Delivered Challans</p>
+              <p className="text-2xl font-bold text-gray-900 mt-1">{deliveredChallansCount}</p>
+              <p className="text-xs text-gray-400 mt-0.5">completed delivery</p>
+            </div>
+            <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center">
+              <Truck className="w-5 h-5 text-emerald-600" />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs font-medium text-gray-500">Delivered Boxes / Units</p>
+              <p className="text-2xl font-bold text-gray-900 mt-1">{deliveredBoxesCount.toLocaleString()}</p>
+              <p className="text-xs text-gray-400 mt-0.5">{deliveredUnitsCount.toLocaleString()} units delivered</p>
+            </div>
+            <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+              <Layers className="w-5 h-5 text-blue-600" />
             </div>
           </div>
         </div>
@@ -255,7 +308,7 @@ const DeliveredGoods = ({ subBoxes = [], onViewChallan, onMarkDelivered }) => {
                         </button>
                         {challan.status !== 'delivered' && (
                           <button
-                            onClick={() => onMarkDelivered && onMarkDelivered(challan.challan_no)}
+                            onClick={() => setConfirmChallanNo(challan.challan_no)}
                             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-700 border border-emerald-200 bg-emerald-50 rounded-lg hover:bg-emerald-100 transition-colors"
                           >
                             <Truck className="w-3.5 h-3.5" /> Mark Delivered

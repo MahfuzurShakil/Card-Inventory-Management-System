@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Fragment } from 'react';
 import { Ship, FileText, Building, CreditCard, Percent, Warehouse, ChevronRight, ChevronDown, Upload, Plus, X, Check, Package, AlertTriangle, Send, Lock } from 'lucide-react';
+import { createMaterialBarcode } from '../utils/barcode';
 
 const ShipmentDetail = ({ lc, shipment, onBack, onUpdateShipment, onComplete }) => {
   const [currentStep, setCurrentStep] = useState(1);
@@ -54,17 +55,18 @@ const ShipmentDetail = ({ lc, shipment, onBack, onUpdateShipment, onComplete }) 
 
     const base = Math.floor(totalQty / noBoxes);
     const rem  = totalQty % noBoxes;
-    const ts   = Date.now();
+    const batchDate = new Date();
 
     return Array.from({ length: noBoxes }, (_, i) => ({
       box_index:   i + 1,
+      shipment_number: shipment?.shipment_number || null,
       box_name:    `${item.item_type}-BOX-${String(i + 1).padStart(3, '0')}`,
       item_type:   item.item_type,
       quantity:    i === noBoxes - 1 ? base + rem : base,
       missing_qty: 0,
       extra_qty:   0,
       reconciliation_notes: [],
-      barcode:     `BC-${ts}-${i + 1}`,
+      barcode:     createMaterialBarcode(i + 1, batchDate),
     }));
   };
 
