@@ -33,8 +33,9 @@ function buildChallanHtml(challanData, items = []) {
 <style>
   *{margin:0;padding:0;box-sizing:border-box;}
   body{font-family:'Segoe UI',Arial,sans-serif;color:#1a1a1a;background:#fff;padding:32px;}
-  .challan{max-width:780px;margin:0 auto;border:1.5px solid #d1d5db;border-radius:10px;overflow:hidden;}
-  .header{display:flex;justify-content:space-between;align-items:flex-start;padding:26px 30px;background:#fff;border-bottom:1.5px solid #e5e7eb;}
+  .challan{position:relative;max-width:780px;margin:0 auto;border:1.5px solid #d1d5db;border-radius:10px;overflow:hidden;background:#fff;}
+  .header,.body,.footer{position:relative;z-index:1;background:transparent;}
+  .header{display:flex;justify-content:space-between;align-items:flex-start;padding:26px 30px;border-bottom:1.5px solid #e5e7eb;}
   .co-name{font-size:24px;font-weight:800;letter-spacing:-0.5px;}
   .co-meta{font-size:10px;color:#6b7280;margin-top:10px;line-height:1.9;}
   .ch-badge{text-align:right;}
@@ -43,12 +44,12 @@ function buildChallanHtml(challanData, items = []) {
   .ch-date,.ch-prepared{font-size:11px;color:#6b7280;margin-top:5px;}
   .body{padding:28px 30px;}
   .meta-strip{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:28px;}
-  .meta-box{background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:13px 16px;}
+  .meta-box{background:rgba(249,250,251,0.7);border:1px solid #d1d5db;border-radius:8px;padding:13px 16px;}
   .meta-label{font-size:9px;font-weight:700;color:#9ca3af;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:5px;}
   .meta-value{font-size:15px;font-weight:700;color:#111827;}
-  .desc-box{background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:12px 16px;margin-bottom:20px;}
-  .desc-label{font-size:9px;font-weight:700;color:#92400e;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;}
-  .desc-text{font-size:12px;color:#78350f;white-space:pre-wrap;word-break:break-word;}
+  .desc-box{background:rgba(249,250,251,0.72);border:1px solid #d1d5db;border-radius:8px;padding:12px 16px;margin-bottom:20px;}
+  .desc-label{font-size:9px;font-weight:700;color:#4b5563;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;}
+  .desc-text{font-size:12px;color:#1f2937;white-space:pre-wrap;word-break:break-word;}
   .footer{padding:18px 30px;border-top:1.5px solid #e5e7eb;display:flex;justify-content:space-between;align-items:flex-end;gap:16px;}
   .footer-note{font-size:10px;color:#9ca3af;line-height:1.6;}
   .sig-area{text-align:center;}
@@ -97,7 +98,7 @@ function buildChallanHtml(challanData, items = []) {
   <div class="footer">
     <div class="footer-note">
       This is a system-generated challan from Onestra ERP.<br/>
-      Challan No: ${escapeHtml(challanData.challan_no)} Generated: ${escapeHtml(formatPrintedAt())}
+      Generated: ${escapeHtml(formatPrintedAt())}
     </div>
     <div class="sig-area">
       <div class="sig-line">Authorized Signature</div>
