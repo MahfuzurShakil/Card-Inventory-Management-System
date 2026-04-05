@@ -1,13 +1,14 @@
 import { useState, useRef, useEffect } from 'react';
 import {
   ChevronRight, Scan, X, FileText, Printer,
-  Package, Plus, CheckCircle, AlertCircle,
-  Hash, Calendar, User, AlertTriangle, Search
+  Package, CheckCircle, AlertCircle,
+  Hash, Calendar, User, AlertTriangle
 } from 'lucide-react';
 import { COMPANY, generateChallanNo, openChallanPrint } from '../utils/challanPrint';
 
 const SubBoxRow = ({ sb, onRemove }) => {
   const good = sb.output_type === 'Good/ QC Approved';
+  const isReadyMade = sb.sourceType === 'ready_made';
 
   return (
     <div className="flex items-center gap-3 px-4 py-2.5 bg-white border border-gray-100 rounded-lg hover:border-gray-300 transition-all group">
@@ -22,16 +23,22 @@ const SubBoxRow = ({ sb, onRemove }) => {
             {good ? 'QC' : 'Wastage'}
           </span>
           <span className={`text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${
-            sb.shift === 'Day' ? 'bg-amber-100 text-amber-700' : sb.shift === 'Night' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-200 text-gray-700'
+            isReadyMade
+              ? 'bg-cyan-100 text-cyan-800'
+              : sb.shift === 'Day'
+                ? 'bg-amber-100 text-amber-700'
+                : sb.shift === 'Night'
+                  ? 'bg-indigo-100 text-indigo-700'
+                  : 'bg-gray-200 text-gray-700'
           }`}>
-            {sb.shift || 'Ready Made'}
+            {isReadyMade ? 'Ready Made' : (sb.shift || '-')}
           </span>
         </div>
-        <p className="text-xs text-gray-400 mt-0.5 font-mono truncate">{sb.barcode || '—'}</p>
+        <p className="text-xs text-gray-400 mt-0.5 font-mono truncate">{sb.barcode || '-'}</p>
       </div>
       <div className="text-right flex-shrink-0">
         <p className="text-sm font-bold text-gray-800">{(sb.quantity || 0).toLocaleString()}</p>
-        <p className="text-xs text-gray-400">{sb.production_date || '—'}</p>
+        <p className="text-xs text-gray-400">{isReadyMade ? '-' : (sb.production_date || '-')}</p>
       </div>
       <button
         onClick={() => onRemove(sb.id)}
@@ -48,9 +55,7 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
   const [scanValue, setScanValue] = useState('');
   const [scanError, setScanError] = useState('');
   const [confirmError, setConfirmError] = useState('');
-  const [searchTerm, setSearchTerm] = useState('');
   const [addedIds, setAddedIds] = useState(preSelectedIds);
-  const [showBrowse, setShowBrowse] = useState(false);
   const [challanInfo, setChallanInfo] = useState({
     challan_no: generateChallanNo(),
     date: new Date().toISOString().split('T')[0],
@@ -60,10 +65,10 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
   });
 
   useEffect(() => {
-    if (!showBrowse) scanInputRef.current?.focus();
-  }, [showBrowse]);
+    scanInputRef.current?.focus();
+  }, []);
 
-  const addedBoxes = subBoxes.filter(sb => addedIds.includes(sb.id));
+  const addedBoxes = subBoxes.filter((sb) => addedIds.includes(sb.id));
   const totalQty = addedBoxes.reduce((sum, sb) => sum + (sb.quantity || 0), 0);
   const challanPayload = {
     challan_no: challanInfo.challan_no,
@@ -73,30 +78,13 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
     item_description: challanInfo.item_description,
   };
 
-  const dispatchableBoxes = subBoxes.filter(sb =>
-    sb.barcode &&
-    sb.box_type !== 'Partial' &&
-    (sb.delivery_status || 'delivery_pending') === 'delivery_pending' &&
-    !addedIds.includes(sb.id)
-  );
-
-  const filteredBrowse = dispatchableBoxes.filter(sb => {
-    const q = searchTerm.toLowerCase();
-
-    return !q ||
-      (sb.sub_box_name || sb.box_name || '').toLowerCase().includes(q) ||
-      (sb.barcode || '').toLowerCase().includes(q) ||
-      (sb.production_date || '').includes(q) ||
-      (sb.shift || '').toLowerCase().includes(q);
-  });
-
   const handleScan = (e) => {
     e?.preventDefault();
 
     const val = scanValue.trim();
     if (!val) return;
 
-    const found = subBoxes.find(sb =>
+    const found = subBoxes.find((sb) =>
       sb.barcode === val || sb.sub_box_name === val || sb.box_name === val
     );
 
@@ -107,7 +95,7 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
     }
 
     if (!found.barcode) {
-      setScanError('This is a partial box — no barcode yet');
+      setScanError('This is a partial box - no barcode yet');
       setScanValue('');
       return;
     }
@@ -124,28 +112,15 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
       return;
     }
 
-    setAddedIds(prev => [...prev, found.id]);
+    setAddedIds((prev) => [...prev, found.id]);
     setScanValue('');
     setScanError('');
     setConfirmError('');
     scanInputRef.current?.focus();
   };
 
-  const handleAddFromBrowse = (sb) => {
-    if (addedIds.includes(sb.id)) return;
-
-    setAddedIds(prev => [...prev, sb.id]);
-    setConfirmError('');
-  };
-
-  const handleAddAllFiltered = () => {
-    const newIds = filteredBrowse.map(sb => sb.id).filter(id => !addedIds.includes(id));
-    setAddedIds(prev => [...prev, ...newIds]);
-    setConfirmError('');
-  };
-
   const handleRemove = (id) => {
-    setAddedIds(prev => prev.filter(x => x !== id));
+    setAddedIds((prev) => prev.filter((x) => x !== id));
   };
 
   const handlePreviewOnly = () => {
@@ -153,9 +128,9 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
     openChallanPrint(challanPayload, addedBoxes);
   };
 
-  const handleConfirmAndPreview = () => {
+  const handleCreateChallan = () => {
     if (addedBoxes.length === 0) {
-      setConfirmError('Add at least one sub-box before confirming the challan.');
+      setConfirmError('Add at least one sub-box before creating the challan.');
       return;
     }
 
@@ -178,10 +153,10 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
     openChallanPrint(challanPayload, addedBoxes);
   };
 
-  const goodCount = addedBoxes.filter(sb => sb.output_type === 'Good/ QC Approved').length;
-  const wastageCount = addedBoxes.filter(sb => sb.output_type !== 'Good/ QC Approved').length;
-  const dayCount = addedBoxes.filter(sb => sb.shift === 'Day').length;
-  const nightCount = addedBoxes.filter(sb => sb.shift === 'Night').length;
+  const goodCount = addedBoxes.filter((sb) => sb.output_type === 'Good/ QC Approved').length;
+  const wastageCount = addedBoxes.filter((sb) => sb.output_type !== 'Good/ QC Approved').length;
+  const dayCount = addedBoxes.filter((sb) => sb.shift === 'Day').length;
+  const nightCount = addedBoxes.filter((sb) => sb.shift === 'Night').length;
 
   return (
     <div className="flex flex-col gap-5">
@@ -191,7 +166,7 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
         </button>
         <div>
           <h1 className="text-xl font-bold text-gray-900">Create Delivery Challan</h1>
-          <p className="text-sm text-gray-400 mt-0.5">Scan or browse boxes, then confirm and preview the challan</p>
+          <p className="text-sm text-gray-400 mt-0.5">Scan boxes, preview the challan, or create and print it</p>
         </div>
       </div>
 
@@ -212,7 +187,7 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
                 <input
                   ref={scanInputRef}
                   value={scanValue}
-                  onChange={e => {
+                  onChange={(e) => {
                     setScanValue(e.target.value);
                     setScanError('');
                   }}
@@ -225,15 +200,6 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
                 >
                   Add
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setShowBrowse(!showBrowse)}
-                  className={`px-4 py-2 text-sm font-semibold rounded-lg border transition-colors ${
-                    showBrowse ? 'bg-blue-50 border-blue-300 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'
-                  }`}
-                >
-                  Browse
-                </button>
               </form>
               {scanError && (
                 <div className="mt-2 flex items-center gap-2 text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
@@ -243,63 +209,10 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
               )}
             </div>
 
-            {showBrowse && (
-              <div className="border-b border-gray-100">
-                <div className="px-4 py-3 bg-gray-50 border-b border-gray-100 flex items-center gap-2">
-                  <Search className="w-4 h-4 text-gray-400" />
-                  <input
-                    type="text"
-                    value={searchTerm}
-                    onChange={e => setSearchTerm(e.target.value)}
-                    placeholder="Search by box name, barcode, date, shift..."
-                    className="flex-1 text-sm bg-transparent border-none outline-none"
-                    autoFocus
-                  />
-                  {filteredBrowse.length > 0 && (
-                    <button
-                      onClick={handleAddAllFiltered}
-                      className="flex-shrink-0 text-xs font-semibold text-blue-600 hover:text-blue-800 px-2 py-1 rounded hover:bg-blue-50 transition-colors"
-                    >
-                      Add all ({filteredBrowse.length})
-                    </button>
-                  )}
-                </div>
-                <div className="max-h-56 overflow-y-auto divide-y divide-gray-50">
-                  {filteredBrowse.length > 0 ? filteredBrowse.map(sb => {
-                    const good = sb.output_type === 'Good/ QC Approved';
-
-                    return (
-                      <div key={sb.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 transition-colors">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-semibold font-mono text-gray-800">{sb.sub_box_name || sb.box_name}</span>
-                            <span className={`text-xs px-1.5 py-0.5 rounded ${good ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                              {good ? 'QC' : 'Waste'}
-                            </span>
-                          </div>
-                          <p className="text-xs text-gray-400">{sb.production_date} · {sb.shift} · {(sb.quantity || 0).toLocaleString()} units</p>
-                        </div>
-                        <button
-                          onClick={() => handleAddFromBrowse(sb)}
-                          className="flex-shrink-0 p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                        >
-                          <Plus className="w-4 h-4" />
-                        </button>
-                      </div>
-                    );
-                  }) : (
-                    <p className="text-xs text-gray-400 text-center py-6">
-                      {searchTerm ? 'No boxes match your search' : 'All dispatchable boxes already added'}
-                    </p>
-                  )}
-                </div>
-              </div>
-            )}
-
             {addedBoxes.length > 0 && (
               <div className="px-5 py-2.5 bg-gray-50 border-b border-gray-100 flex items-center justify-between flex-wrap gap-2">
                 <span className="text-xs font-semibold text-gray-600">
-                  {addedBoxes.length} box{addedBoxes.length !== 1 ? 'es' : ''} · {totalQty.toLocaleString()} units
+                  {addedBoxes.length} box{addedBoxes.length !== 1 ? 'es' : ''} - {totalQty.toLocaleString()} units
                 </span>
                 <div className="flex items-center gap-2">
                   {goodCount > 0 && <span className="text-xs px-2 py-0.5 bg-emerald-100 text-emerald-700 font-semibold rounded">QC {goodCount}</span>}
@@ -317,11 +230,11 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
                     <Package className="w-6 h-6 text-gray-300" />
                   </div>
                   <p className="text-sm font-medium text-gray-400">No boxes added yet</p>
-                  <p className="text-xs text-gray-300 mt-1">Scan a barcode or use Browse to add boxes</p>
+                  <p className="text-xs text-gray-300 mt-1">Scan a barcode to add boxes to the challan</p>
                 </div>
               ) : (
                 <div className="p-3 space-y-1.5">
-                  {addedBoxes.map(sb => (
+                  {addedBoxes.map((sb) => (
                     <SubBoxRow key={sb.id} sb={sb} onRemove={handleRemove} />
                   ))}
                 </div>
@@ -332,7 +245,7 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
               <div className="px-5 py-3 border-t border-gray-100 bg-gray-50 flex items-center justify-between">
                 <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Total</span>
                 <span className="text-sm font-bold text-gray-900">
-                  {totalQty.toLocaleString()} units · {addedBoxes.length} boxes
+                  {totalQty.toLocaleString()} units - {addedBoxes.length} boxes
                 </span>
               </div>
             )}
@@ -352,7 +265,7 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
                   </label>
                   <input
                     value={challanInfo.challan_no}
-                    onChange={e => setChallanInfo(p => ({ ...p, challan_no: e.target.value }))}
+                    onChange={(e) => setChallanInfo((p) => ({ ...p, challan_no: e.target.value }))}
                     className="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs bg-white font-mono text-gray-700 focus:ring-2 focus:ring-blue-500 transition-all"
                   />
                 </div>
@@ -363,7 +276,7 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
                   <input
                     type="date"
                     value={challanInfo.date}
-                    onChange={e => setChallanInfo(p => ({ ...p, date: e.target.value }))}
+                    onChange={(e) => setChallanInfo((p) => ({ ...p, date: e.target.value }))}
                     className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 transition-all"
                   />
                 </div>
@@ -384,7 +297,7 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
                 </label>
                 <input
                   value={challanInfo.item_name}
-                  onChange={e => setChallanInfo(p => ({ ...p, item_name: e.target.value }))}
+                  onChange={(e) => setChallanInfo((p) => ({ ...p, item_name: e.target.value }))}
                   placeholder="Item name"
                   className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 transition-all"
                 />
@@ -397,7 +310,7 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
                 <textarea
                   rows={2}
                   value={challanInfo.item_description}
-                  onChange={e => setChallanInfo(p => ({ ...p, item_description: e.target.value }))}
+                  onChange={(e) => setChallanInfo((p) => ({ ...p, item_description: e.target.value }))}
                   placeholder="Add item description if needed..."
                   className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white resize-none focus:ring-2 focus:ring-blue-500 transition-all"
                 />
@@ -407,14 +320,17 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
 
           {addedBoxes.length > 0 && (
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-              <div className="px-5 py-3.5 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+              <div className="px-5 py-3.5 border-b border-gray-100 bg-gray-50">
                 <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Preview</p>
-                <span className="text-xs text-gray-400">Matches the printed challan</span>
               </div>
               <div className="p-4 font-mono text-xs text-gray-700 bg-white border-2 border-dashed border-gray-200 rounded-lg m-3 space-y-3">
                 <div className="rounded-lg border border-gray-200 bg-white px-3 py-3">
                   <div className="font-bold text-sm text-gray-900">{COMPANY.name}</div>
-                  <div className="mt-2 text-[11px] text-gray-500">{COMPANY.address}</div>
+                  <div className="mt-2 text-[11px] text-gray-500 space-y-1">
+                    <div>{COMPANY.address}</div>
+                    <div>{COMPANY.phone}</div>
+                    <div>{COMPANY.email}</div>
+                  </div>
                   <div className="mt-2 flex justify-between items-start gap-4 text-[11px]">
                     <span className="font-bold uppercase tracking-wider text-gray-500">Delivery Challan</span>
                     <div className="text-right text-gray-600 space-y-1">
@@ -435,7 +351,7 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
                   </div>
                   <div className="rounded border border-gray-200 bg-gray-50 px-2.5 py-2">
                     <div className="text-[10px] uppercase tracking-wide text-gray-400">Total Quantity</div>
-                    <div className="mt-1 font-semibold text-gray-800">{totalQty.toLocaleString()}</div>
+                    <div className="mt-1 font-semibold text-gray-800">{totalQty.toLocaleString()} units</div>
                   </div>
                 </div>
                 {challanPayload.item_description && (
@@ -454,7 +370,7 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
 
           <div className="flex flex-col gap-2">
             <button
-              onClick={handleConfirmAndPreview}
+              onClick={handleCreateChallan}
               disabled={addedBoxes.length === 0}
               className={`w-full flex items-center justify-center gap-2 py-3.5 text-sm font-bold rounded-xl transition-all ${
                 addedBoxes.length === 0
@@ -463,7 +379,7 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
               }`}
             >
               <Printer className="w-4 h-4" />
-              {addedBoxes.length > 0 ? `Confirm + Preview (${addedBoxes.length} boxes)` : 'Add Boxes to Confirm'}
+              {addedBoxes.length > 0 ? 'Create Challan' : 'Add Boxes to Create Challan'}
             </button>
             <button
               onClick={handlePreviewOnly}
@@ -475,7 +391,7 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
               }`}
             >
               <FileText className="w-4 h-4" />
-              Preview Only
+              Preview Challan
             </button>
             <button
               onClick={onBack}
@@ -492,11 +408,11 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
             </div>
           )}
 
-          {subBoxes.filter(sb => sb.box_type === 'Partial' && !addedIds.includes(sb.id)).length > 0 && (
+          {subBoxes.filter((sb) => sb.box_type === 'Partial' && !addedIds.includes(sb.id)).length > 0 && (
             <div className="flex items-start gap-2 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl">
               <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
               <p className="text-xs text-amber-800">
-                <span className="font-semibold">Partial boxes</span> cannot be added to a challan — they have no barcode yet.
+                <span className="font-semibold">Partial boxes</span> cannot be added to a challan - they have no barcode yet.
                 Close them first on the Sub-Box Creation page.
               </p>
             </div>
