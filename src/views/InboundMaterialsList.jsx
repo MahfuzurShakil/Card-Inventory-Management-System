@@ -1,12 +1,33 @@
 import { useState } from 'react';
-import { Package, Search, TruckIcon, AlertTriangle, Eye, ChevronLeft, ChevronRight, Clock, CheckCircle2 } from 'lucide-react';
+import {
+  Package, Search, TruckIcon, AlertTriangle, Eye, ChevronLeft, ChevronRight,
+  Clock, CheckCircle2, SlidersHorizontal, ChevronDown, RotateCcw
+} from 'lucide-react';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Action Buttons per status:
-//   Pending             → [Receive]
-//   Partially Received  → [Continue Receiving] [View icon]
-//   Received            → [View icon only]
-// ─────────────────────────────────────────────────────────────────────────────
+const DEFAULT_FILTERS = {
+  quickSearch: '',
+  status: 'all',
+  lcNumber: '',
+  receiveDateFrom: '',
+  receiveDateTo: '',
+};
+
+const normalizeText = (value) => (value || '').toString().trim().toLowerCase();
+
+const toDateValue = (value) => {
+  if (!value) return null;
+  const d = new Date(value);
+  if (isNaN(d)) return null;
+  return d;
+};
+
+const formatDateInputValue = (value) => {
+  const date = toDateValue(value);
+  if (!date) return '';
+  const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return localDate.toISOString().slice(0, 10);
+};
+
 const ActionButtons = ({ material, onReceiveMaterial, onViewDetails }) => {
   if (material.status === 'Received') {
     return (
@@ -40,7 +61,6 @@ const ActionButtons = ({ material, onReceiveMaterial, onViewDetails }) => {
     );
   }
 
-  // Pending — only Receive button
   return (
     <button
       onClick={() => onReceiveMaterial(material)}
@@ -51,18 +71,16 @@ const ActionButtons = ({ material, onReceiveMaterial, onViewDetails }) => {
   );
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Main Component
-// ─────────────────────────────────────────────────────────────────────────────
 const InboundMaterialsList = ({ inboundMaterials, lcs, onReceiveMaterial, onViewDetails }) => {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [draftFilters, setDraftFilters] = useState(DEFAULT_FILTERS);
+  const [appliedFilters, setAppliedFilters] = useState(DEFAULT_FILTERS);
+  const [showMoreFilters, setShowMoreFilters] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
   const getShipmentDetails = (shipmentId) => {
     for (const lc of lcs) {
-      const shipment = lc.shipments.find(s => s.id === shipmentId);
+      const shipment = lc.shipments.find((s) => s.id === shipmentId);
       if (shipment) return { shipment, lc };
     }
     return null;
@@ -76,41 +94,58 @@ const InboundMaterialsList = ({ inboundMaterials, lcs, onReceiveMaterial, onView
       + ' ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
   };
 
-  const filteredMaterials = inboundMaterials.filter(material => {
-    const details = (() => {
-      for (const lc of lcs) {
-        const shipment = lc.shipments.find(s => s.id === material.shipment_id);
-        if (shipment) return { shipment, lc };
-      }
-      return null;
-    })();
+  const updateDraftFilter = (key, value) => {
+    setDraftFilters((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const applyFilters = () => {
+    setAppliedFilters(draftFilters);
+    setCurrentPage(1);
+  };
+
+  const resetFilters = () => {
+    setDraftFilters(DEFAULT_FILTERS);
+    setAppliedFilters(DEFAULT_FILTERS);
+    setShowMoreFilters(false);
+    setCurrentPage(1);
+  };
+
+  const filteredMaterials = inboundMaterials.filter((material) => {
+    const details = getShipmentDetails(material.shipment_id);
     const warehouseStatus = details?.shipment?.stepData?.warehouse?.warehouse_status;
     if (!warehouseStatus || warehouseStatus === 'draft') return false;
 
-    const matchesSearch = searchTerm === '' ||
-      material.shipment_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (material.item_description && material.item_description.toLowerCase().includes(searchTerm.toLowerCase()));
-    const matchesStatus = statusFilter === 'all' || material.status === statusFilter;
-    return matchesSearch && matchesStatus;
+    const shipmentSearch = normalizeText(appliedFilters.quickSearch);
+    const lcSearch = normalizeText(appliedFilters.lcNumber);
+    const shipmentNumber = normalizeText(material.shipment_number);
+    const materialLcNumber = normalizeText(material.lc_number || details?.lc?.lc_number);
+    const receivedDate = toDateValue(material.received_at);
+    const receivedDateOnly = receivedDate ? formatDateInputValue(receivedDate) : '';
+
+    const matchesQuickSearch = !shipmentSearch || shipmentNumber.includes(shipmentSearch);
+    const matchesStatus = appliedFilters.status === 'all' || material.status === appliedFilters.status;
+    const matchesLcNumber = !lcSearch || materialLcNumber.includes(lcSearch);
+
+    const hasReceiveDateFilter = Boolean(appliedFilters.receiveDateFrom || appliedFilters.receiveDateTo);
+    const matchesReceiveDateFrom = !appliedFilters.receiveDateFrom
+      || (receivedDateOnly && receivedDateOnly >= appliedFilters.receiveDateFrom);
+    const matchesReceiveDateTo = !appliedFilters.receiveDateTo
+      || (receivedDateOnly && receivedDateOnly <= appliedFilters.receiveDateTo);
+    const matchesReceiveDate = !hasReceiveDateFilter || (receivedDate && matchesReceiveDateFrom && matchesReceiveDateTo);
+
+    return matchesQuickSearch && matchesStatus && matchesLcNumber && matchesReceiveDate;
   });
 
-  const handleFilterChange = (setter) => (value) => { setter(value); setCurrentPage(1); };
-
-  // Stats — count only visible (non-draft) materials
-  const visibleMaterials = inboundMaterials.filter(m => {
-    for (const lc of lcs) {
-      const s = lc.shipments.find(s => s.id === m.shipment_id);
-      if (s) {
-        const ws = s.stepData?.warehouse?.warehouse_status;
-        return ws && ws !== 'draft';
-      }
-    }
-    return false;
+  const visibleMaterials = inboundMaterials.filter((material) => {
+    const details = getShipmentDetails(material.shipment_id);
+    const ws = details?.shipment?.stepData?.warehouse?.warehouse_status;
+    return ws && ws !== 'draft';
   });
+
   const totalMaterials = visibleMaterials.length;
-  const pendingCount   = visibleMaterials.filter(m => m.status === 'Pending').length;
-  const partialCount   = visibleMaterials.filter(m => m.status === 'Partially Received').length;
-  const receivedCount  = visibleMaterials.filter(m => m.status === 'Received').length;
+  const pendingCount = visibleMaterials.filter((m) => m.status === 'Pending').length;
+  const partialCount = visibleMaterials.filter((m) => m.status === 'Partially Received').length;
+  const receivedCount = visibleMaterials.filter((m) => m.status === 'Received').length;
 
   const totalPages = Math.ceil(filteredMaterials.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
@@ -126,7 +161,6 @@ const InboundMaterialsList = ({ inboundMaterials, lcs, onReceiveMaterial, onView
         </div>
       </div>
 
-      {/* ── 4 Stat Cards ── */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
           <div className="flex items-center justify-between">
@@ -177,33 +211,108 @@ const InboundMaterialsList = ({ inboundMaterials, lcs, onReceiveMaterial, onView
         </div>
       </div>
 
-      {/* ── Search & Filter ── */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-        <div className="flex items-center gap-3">
-          <div className="relative flex-1">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search by shipment number or item..."
-              value={searchTerm}
-              onChange={(e) => handleFilterChange(setSearchTerm)(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+        <div className="p-3.5 md:p-4 border-b border-gray-100">
+          <div className="flex flex-col xl:flex-row gap-2.5">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search By Shipment Number"
+                className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                value={draftFilters.quickSearch}
+                onChange={(e) => updateDraftFilter('quickSearch', e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') applyFilters();
+                }}
+              />
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2.5 xl:flex-none">
+              <select
+                className="w-full sm:w-40 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                value={draftFilters.status}
+                onChange={(e) => updateDraftFilter('status', e.target.value)}
+              >
+                <option value="all">All Status</option>
+                <option value="Pending">Pending</option>
+                <option value="Partially Received">In Progress</option>
+                <option value="Received">Received</option>
+              </select>
+
+              <button
+                onClick={() => setShowMoreFilters((prev) => !prev)}
+                className={`inline-flex items-center justify-center gap-2 px-3.5 py-2 text-sm border rounded-lg transition-colors ${
+                  showMoreFilters ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                <SlidersHorizontal className="w-4 h-4" />
+                More Filters
+                <ChevronDown className={`w-4 h-4 transition-transform ${showMoreFilters ? 'rotate-180' : ''}`} />
+              </button>
+
+              <button
+                onClick={applyFilters}
+                className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+              >
+                Search
+              </button>
+
+              <button
+                onClick={resetFilters}
+                className="inline-flex items-center justify-center gap-2 px-3.5 py-2 text-sm border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                <RotateCcw className="w-4 h-4" />
+                Reset
+              </button>
+            </div>
           </div>
-          <select
-            className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            value={statusFilter}
-            onChange={(e) => handleFilterChange(setStatusFilter)(e.target.value)}
-          >
-            <option value="all">All Status</option>
-            <option value="Pending">Pending</option>
-            <option value="Partially Received">In Progress</option>
-            <option value="Received">Received</option>
-          </select>
         </div>
+
+        {showMoreFilters && (
+          <div className="p-3.5 md:p-4 bg-gray-50/70">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1.5">LC Number</label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Filter by LC number"
+                    className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    value={draftFilters.lcNumber}
+                    onChange={(e) => updateDraftFilter('lcNumber', e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') applyFilters();
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1.5">Receive Date From</label>
+                <input
+                  type="date"
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  value={draftFilters.receiveDateFrom}
+                  onChange={(e) => updateDraftFilter('receiveDateFrom', e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1.5">Receive Date To</label>
+                <input
+                  type="date"
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  value={draftFilters.receiveDateTo}
+                  onChange={(e) => updateDraftFilter('receiveDateTo', e.target.value)}
+                />
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* ── Data Table ── */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm text-left">
@@ -228,7 +337,6 @@ const InboundMaterialsList = ({ inboundMaterials, lcs, onReceiveMaterial, onView
                   const shipment = details?.shipment;
                   const warehouseItems = shipment?.stepData?.warehouse?.items || [];
 
-                  // No warehouse items — plain single row
                   if (warehouseItems.length === 0) {
                     return (
                       <tr key={material.id} className="hover:bg-gray-50 transition-colors">
@@ -271,15 +379,13 @@ const InboundMaterialsList = ({ inboundMaterials, lcs, onReceiveMaterial, onView
                     );
                   }
 
-                  // Multiple warehouse items — sub-rows with rowSpan on shared columns
                   return warehouseItems.map((item, itemIdx) => {
-                    const itemQty   = parseInt(item.quantity) || 0;
+                    const itemQty = parseInt(item.quantity) || 0;
                     const itemBoxes = parseInt(item.no_of_boxes) || 0;
                     const qtyPerBox = itemBoxes > 0 ? Math.floor(itemQty / itemBoxes) : 0;
 
                     return (
                       <tr key={`${material.id}-${itemIdx}`} className="hover:bg-gray-50 transition-colors">
-                        {/* Shipment # — rowSpan, first sub-row only */}
                         {itemIdx === 0 ? (
                           <>
                             <td className="px-6 py-4" rowSpan={warehouseItems.length}>
@@ -294,34 +400,29 @@ const InboundMaterialsList = ({ inboundMaterials, lcs, onReceiveMaterial, onView
                           </>
                         ) : null}
 
-                        {/* Item Name — per sub-row */}
                         <td className="px-6 py-4">
                           <span className={`px-2.5 py-1 text-xs font-semibold rounded ${
-                            (item.item_type || item.item_name || '').toLowerCase().includes('chip')  ? 'bg-blue-100 text-blue-800' :
-                            (item.item_type || item.item_name || '').toLowerCase().includes('tape')  ? 'bg-purple-100 text-purple-800' :
-                            (item.item_type || item.item_name || '').toLowerCase().includes('sheet') ? 'bg-green-100 text-green-800' :
-                            'bg-gray-100 text-gray-800'
+                            (item.item_type || item.item_name || '').toLowerCase().includes('chip') ? 'bg-blue-100 text-blue-800'
+                              : (item.item_type || item.item_name || '').toLowerCase().includes('tape') ? 'bg-purple-100 text-purple-800'
+                                : (item.item_type || item.item_name || '').toLowerCase().includes('sheet') ? 'bg-green-100 text-green-800'
+                                  : 'bg-gray-100 text-gray-800'
                           }`}>
                             {item.item_type || item.item_name || 'N/A'}
                           </span>
                         </td>
 
-                        {/* No of Boxes — per sub-row */}
                         <td className="px-6 py-4 text-sm font-medium text-gray-900 text-right">
                           {itemBoxes}
                         </td>
 
-                        {/* Qty/Box — per sub-row */}
                         <td className="px-6 py-4 text-sm font-medium text-gray-900 text-right">
                           {qtyPerBox.toLocaleString()}
                         </td>
 
-                        {/* Quantity — per sub-row */}
                         <td className="px-6 py-4 text-sm font-medium text-gray-900 text-right">
                           {itemQty.toLocaleString()}
                         </td>
 
-                        {/* Received At — rowSpan, first sub-row only */}
                         {itemIdx === 0 ? (
                           <td className="px-6 py-4 text-sm" rowSpan={warehouseItems.length}>
                             {material.status === 'Received' && material.received_at ? (
@@ -336,7 +437,6 @@ const InboundMaterialsList = ({ inboundMaterials, lcs, onReceiveMaterial, onView
                           </td>
                         ) : null}
 
-                        {/* Status — rowSpan */}
                         {itemIdx === 0 ? (
                           <td className="px-6 py-4" rowSpan={warehouseItems.length}>
                             {material.status === 'Pending' ? (
@@ -349,7 +449,6 @@ const InboundMaterialsList = ({ inboundMaterials, lcs, onReceiveMaterial, onView
                           </td>
                         ) : null}
 
-                        {/* Action — rowSpan */}
                         {itemIdx === 0 ? (
                           <td className="px-6 py-4 text-right" rowSpan={warehouseItems.length}>
                             <ActionButtons
@@ -366,7 +465,7 @@ const InboundMaterialsList = ({ inboundMaterials, lcs, onReceiveMaterial, onView
               ) : (
                 <tr>
                   <td colSpan="9" className="px-6 py-12 text-center text-sm text-gray-500">
-                    {searchTerm || statusFilter !== 'all'
+                    {appliedFilters.quickSearch || appliedFilters.status !== 'all' || appliedFilters.lcNumber || appliedFilters.receiveDateFrom || appliedFilters.receiveDateTo
                       ? 'No materials found matching your filters.'
                       : (
                         <div>
@@ -392,7 +491,7 @@ const InboundMaterialsList = ({ inboundMaterials, lcs, onReceiveMaterial, onView
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                   disabled={currentPage === 1}
                   className="p-2 border border-gray-300 rounded-lg hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
@@ -400,7 +499,7 @@ const InboundMaterialsList = ({ inboundMaterials, lcs, onReceiveMaterial, onView
                 </button>
                 <span className="text-sm text-gray-700">Page {currentPage} of {totalPages}</span>
                 <button
-                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                   disabled={currentPage === totalPages}
                   className="p-2 border border-gray-300 rounded-lg hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
