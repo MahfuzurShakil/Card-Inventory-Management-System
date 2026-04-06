@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
 import {
   ChevronRight, Scan, X, FileText, Printer,
-  Package, CheckCircle, AlertCircle,
-  Hash, Calendar, User, AlertTriangle
+  Package, AlertCircle, Hash, Calendar,
+  User, AlertTriangle, MapPin, Building2, Layers
 } from 'lucide-react';
-import { COMPANY, generateChallanNo, openChallanPrint } from '../utils/challanPrint';
+import { generateChallanNo, openChallanPrint } from '../utils/challanPrint';
 
 const SubBoxRow = ({ sb, onRemove }) => {
   const good = sb.output_type === 'Good/ QC Approved';
@@ -55,11 +55,14 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
   const [scanValue, setScanValue] = useState('');
   const [scanError, setScanError] = useState('');
   const [confirmError, setConfirmError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState({});
   const [addedIds, setAddedIds] = useState(preSelectedIds);
   const [challanInfo, setChallanInfo] = useState({
     challan_no: generateChallanNo(),
     date: new Date().toISOString().split('T')[0],
     prepared_by: 'Production Staff',
+    receiver_name: '',
+    receiver_address: '',
     item_name: 'Smart Blank Card',
     item_description: '',
   });
@@ -74,8 +77,21 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
     challan_no: challanInfo.challan_no,
     date: challanInfo.date,
     prepared_by: challanInfo.prepared_by || 'Production Staff',
+    receiver_name: challanInfo.receiver_name.trim(),
+    receiver_address: challanInfo.receiver_address.trim(),
     item_name: challanInfo.item_name || 'Smart Blank Card',
     item_description: challanInfo.item_description,
+  };
+
+  const handleInfoChange = (field, value) => {
+    setChallanInfo((prev) => ({ ...prev, [field]: value }));
+    setConfirmError('');
+    setFieldErrors((prev) => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
   };
 
   const handleScan = (e) => {
@@ -123,14 +139,29 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
     setAddedIds((prev) => prev.filter((x) => x !== id));
   };
 
-  const handlePreviewOnly = () => {
-    if (addedBoxes.length === 0) return;
-    openChallanPrint(challanPayload, addedBoxes);
+  const validateChallanInfo = () => {
+    const nextErrors = {};
+
+    if (!challanPayload.receiver_name) {
+      nextErrors.receiver_name = 'Receiver name is required.';
+    }
+
+    if (!challanPayload.receiver_address) {
+      nextErrors.receiver_address = 'Receiver address is required.';
+    }
+
+    setFieldErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
   };
 
   const handleCreateChallan = () => {
     if (addedBoxes.length === 0) {
       setConfirmError('Add at least one sub-box before creating the challan.');
+      return;
+    }
+
+    if (!validateChallanInfo()) {
+      setConfirmError('Receiver name and address are required before creating the challan.');
       return;
     }
 
@@ -146,6 +177,8 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
       challan_no: challanPayload.challan_no,
       challan_date: challanPayload.date,
       challan_prepared_by: challanPayload.prepared_by,
+      challan_receiver_name: challanPayload.receiver_name,
+      challan_receiver_address: challanPayload.receiver_address,
       challan_item_name: challanPayload.item_name,
       challan_item_description: challanPayload.item_description,
       challan_remarks: challanPayload.item_description,
@@ -166,7 +199,7 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
         </button>
         <div>
           <h1 className="text-xl font-bold text-gray-900">Create Delivery Challan</h1>
-          <p className="text-sm text-gray-400 mt-0.5">Scan boxes, preview the challan, or create and print it</p>
+          <p className="text-sm text-gray-400 mt-0.5">Scan boxes, complete dispatch details, and create the printable challan</p>
         </div>
       </div>
 
@@ -254,8 +287,9 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
 
         <div className="lg:col-span-2 flex flex-col gap-4">
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <div className="px-5 py-3.5 border-b border-gray-100 bg-gray-50">
-              <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Challan Details</p>
+            <div className="px-5 py-4 border-b border-gray-100 bg-gradient-to-r from-orange-50 via-white to-slate-50">
+              <p className="text-xs font-bold text-orange-700 uppercase tracking-[0.24em]">Dispatch Details</p>
+              <p className="text-sm text-gray-500 mt-1">Receiver information and challan metadata for print.</p>
             </div>
             <div className="px-5 py-4 space-y-4">
               <div className="grid grid-cols-2 gap-3">
@@ -265,7 +299,7 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
                   </label>
                   <input
                     value={challanInfo.challan_no}
-                    onChange={(e) => setChallanInfo((p) => ({ ...p, challan_no: e.target.value }))}
+                    onChange={(e) => handleInfoChange('challan_no', e.target.value)}
                     className="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs bg-white font-mono text-gray-700 focus:ring-2 focus:ring-blue-500 transition-all"
                   />
                 </div>
@@ -276,7 +310,7 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
                   <input
                     type="date"
                     value={challanInfo.date}
-                    onChange={(e) => setChallanInfo((p) => ({ ...p, date: e.target.value }))}
+                    onChange={(e) => handleInfoChange('date', e.target.value)}
                     className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 transition-all"
                   />
                 </div>
@@ -293,11 +327,44 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1.5">
+                  <Building2 className="w-3 h-3 inline mr-1" />Receiver Name
+                </label>
+                <input
+                  value={challanInfo.receiver_name}
+                  onChange={(e) => handleInfoChange('receiver_name', e.target.value)}
+                  placeholder="Enter receiving company or person"
+                  className={`w-full px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 transition-all ${
+                    fieldErrors.receiver_name ? 'border-red-300 bg-red-50' : 'border-gray-200'
+                  }`}
+                />
+                {fieldErrors.receiver_name && (
+                  <p className="mt-1.5 text-xs text-red-600">{fieldErrors.receiver_name}</p>
+                )}
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">
+                  <MapPin className="w-3 h-3 inline mr-1" />Receiver Address
+                </label>
+                <textarea
+                  rows={3}
+                  value={challanInfo.receiver_address}
+                  onChange={(e) => handleInfoChange('receiver_address', e.target.value)}
+                  placeholder="Enter full delivery address"
+                  className={`w-full px-3 py-2 border rounded-lg text-sm bg-white resize-none focus:ring-2 focus:ring-blue-500 transition-all ${
+                    fieldErrors.receiver_address ? 'border-red-300 bg-red-50' : 'border-gray-200'
+                  }`}
+                />
+                {fieldErrors.receiver_address && (
+                  <p className="mt-1.5 text-xs text-red-600">{fieldErrors.receiver_address}</p>
+                )}
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">
                   <Package className="w-3 h-3 inline mr-1" />Item Name
                 </label>
                 <input
                   value={challanInfo.item_name}
-                  onChange={(e) => setChallanInfo((p) => ({ ...p, item_name: e.target.value }))}
+                  onChange={(e) => handleInfoChange('item_name', e.target.value)}
                   placeholder="Item name"
                   className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 transition-all"
                 />
@@ -310,7 +377,7 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
                 <textarea
                   rows={2}
                   value={challanInfo.item_description}
-                  onChange={(e) => setChallanInfo((p) => ({ ...p, item_description: e.target.value }))}
+                  onChange={(e) => handleInfoChange('item_description', e.target.value)}
                   placeholder="Add item description if needed..."
                   className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white resize-none focus:ring-2 focus:ring-blue-500 transition-all"
                 />
@@ -318,55 +385,42 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
             </div>
           </div>
 
-          {addedBoxes.length > 0 && (
-            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-              <div className="px-5 py-3.5 border-b border-gray-100 bg-gray-50">
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Preview</p>
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <div className="px-5 py-4 border-b border-gray-100">
+              <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Dispatch Summary</p>
+            </div>
+            <div className="p-4 space-y-4">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-3">
+                  <p className="text-[11px] uppercase tracking-wide text-gray-400">Boxes</p>
+                  <p className="mt-1 text-lg font-bold text-gray-900">{addedBoxes.length}</p>
+                </div>
+                <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-3">
+                  <p className="text-[11px] uppercase tracking-wide text-gray-400">Quantity</p>
+                  <p className="mt-1 text-lg font-bold text-gray-900">{totalQty.toLocaleString()}</p>
+                </div>
+                <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-3">
+                  <p className="text-[11px] uppercase tracking-wide text-gray-400">Challan Date</p>
+                  <p className="mt-1 text-sm font-semibold text-gray-900">{challanPayload.date || '-'}</p>
+                </div>
               </div>
-              <div className="p-4 font-mono text-xs text-gray-700 bg-white border-2 border-dashed border-gray-200 rounded-lg m-3 space-y-3">
-                <div className="rounded-lg border border-gray-200 bg-white px-3 py-3">
-                  <div className="font-bold text-sm text-gray-900">{COMPANY.name}</div>
-                  <div className="mt-2 text-[11px] text-gray-500 space-y-1">
-                    <div>{COMPANY.address}</div>
-                    <div>{COMPANY.phone}</div>
-                    <div>{COMPANY.email}</div>
-                  </div>
-                  <div className="mt-2 flex justify-between items-start gap-4 text-[11px]">
-                    <span className="font-bold uppercase tracking-wider text-gray-500">Delivery Challan</span>
-                    <div className="text-right text-gray-600 space-y-1">
-                      <div>{challanPayload.challan_no}</div>
-                      <div>Date: {challanPayload.date}</div>
-                      <div>Prepared By: {challanPayload.prepared_by}</div>
-                    </div>
-                  </div>
+
+              <div className="rounded-2xl border border-orange-100 bg-gradient-to-br from-orange-50 via-white to-slate-50 px-4 py-4">
+                <div className="flex items-center gap-2 text-orange-700">
+                  <Layers className="w-4 h-4" />
+                  <p className="text-sm font-semibold">Print-ready challan packet</p>
                 </div>
-                <div className="grid grid-cols-3 gap-2 text-[11px]">
-                  <div className="rounded border border-gray-200 bg-gray-50 px-2.5 py-2">
-                    <div className="text-[10px] uppercase tracking-wide text-gray-400">Item Name</div>
-                    <div className="mt-1 font-semibold text-gray-800">{challanPayload.item_name}</div>
-                  </div>
-                  <div className="rounded border border-gray-200 bg-gray-50 px-2.5 py-2">
-                    <div className="text-[10px] uppercase tracking-wide text-gray-400">Number of Box</div>
-                    <div className="mt-1 font-semibold text-gray-800">{addedBoxes.length}</div>
-                  </div>
-                  <div className="rounded border border-gray-200 bg-gray-50 px-2.5 py-2">
-                    <div className="text-[10px] uppercase tracking-wide text-gray-400">Total Quantity</div>
-                    <div className="mt-1 font-semibold text-gray-800">{totalQty.toLocaleString()} units</div>
-                  </div>
+                <div className="mt-3 space-y-2 text-sm text-gray-600">
+                  <p><span className="font-medium text-gray-800">Receiver:</span> {challanPayload.receiver_name || 'Not provided yet'}</p>
+                  <p><span className="font-medium text-gray-800">Address:</span> {challanPayload.receiver_address || 'Not provided yet'}</p>
+                  <p><span className="font-medium text-gray-800">Item:</span> {challanPayload.item_name || 'Smart Blank Card'}</p>
                 </div>
-                {challanPayload.item_description && (
-                  <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-gray-700">
-                    <div className="text-[10px] uppercase tracking-wide text-amber-700">Item Description</div>
-                    <div className="mt-1 whitespace-pre-wrap">{challanPayload.item_description}</div>
-                  </div>
-                )}
-                <div className="border-t border-gray-300 pt-2 flex items-end justify-between text-gray-500 text-xs">
-                  <div>System-generated challan preview</div>
-                  <div className="w-28 border-t border-gray-500 pt-1 text-center">Authorized Signature</div>
-                </div>
+                <p className="mt-4 text-xs leading-5 text-gray-500">
+                  Creating the challan will save the dispatch details to the selected boxes and open the redesigned print layout with the Onestra branding.
+                </p>
               </div>
             </div>
-          )}
+          </div>
 
           <div className="flex flex-col gap-2">
             <button
@@ -379,19 +433,7 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
               }`}
             >
               <Printer className="w-4 h-4" />
-              {addedBoxes.length > 0 ? 'Create Challan' : 'Add Boxes to Create Challan'}
-            </button>
-            <button
-              onClick={handlePreviewOnly}
-              disabled={addedBoxes.length === 0}
-              className={`w-full flex items-center justify-center gap-2 py-3 text-sm font-semibold rounded-xl transition-colors ${
-                addedBoxes.length === 0
-                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed border border-gray-200'
-                  : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'
-              }`}
-            >
-              <FileText className="w-4 h-4" />
-              Preview Challan
+              {addedBoxes.length > 0 ? 'Create & Print Challan' : 'Add Boxes to Create Challan'}
             </button>
             <button
               onClick={onBack}

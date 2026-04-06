@@ -24,6 +24,8 @@ function buildChallans(subBoxes) {
         challan_no: sb.challan_no,
         date: sb.challan_date || sb.production_date || '',
         prepared_by: sb.challan_prepared_by || 'Production Staff',
+        receiver_name: sb.challan_receiver_name || '',
+        receiver_address: sb.challan_receiver_address || '',
         item_name: sb.challan_item_name || 'Smart Blank Card',
         item_description: sb.challan_item_description || sb.challan_remarks || '',
         remarks: sb.challan_item_description || sb.challan_remarks || '',

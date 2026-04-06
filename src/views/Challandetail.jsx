@@ -2,7 +2,7 @@ import { useState } from 'react';
 import {
   ChevronRight, Calendar, Printer, Download,
   Barcode, ChevronLeft, ChevronRight as ChevronRightIcon,
-  Truck, Package, Layers, FileText, User, AlertTriangle
+  Truck, Package, Layers, FileText, User, AlertTriangle, MapPin, Building2
 } from 'lucide-react';
 import { openChallanPrint } from '../utils/challanPrint';
 
@@ -151,10 +151,27 @@ const ChallanDetail = ({ challan, onBack, onMarkDelivered }) => {
             </div>
           </div>
 
+          <div className="border-t border-gray-200 pt-4 space-y-3">
+            <div className="flex items-start gap-3 text-sm">
+              <p className="w-36 text-xs text-gray-500 uppercase font-medium flex items-center gap-1.5 pt-0.5">
+                <Building2 className="w-3.5 h-3.5 text-gray-400" />
+                Receiver Name
+              </p>
+              <p className="flex-1 font-semibold text-gray-900">{challan.receiver_name || '-'}</p>
+            </div>
+            <div className="flex items-start gap-3 text-sm">
+              <p className="w-36 text-xs text-gray-500 uppercase font-medium flex items-center gap-1.5 pt-0.5">
+                <MapPin className="w-3.5 h-3.5 text-gray-400" />
+                Receiver Address
+              </p>
+              <p className="flex-1 text-gray-700 whitespace-pre-wrap">{challan.receiver_address || '-'}</p>
+            </div>
+          </div>
+
           {itemDescription && (
-            <div>
+            <div className="border-t border-gray-200 pt-4">
               <p className="text-xs text-gray-500 uppercase font-medium mb-1.5">Item Description</p>
-              <p className="text-sm text-gray-700 bg-gray-50 border border-gray-100 rounded-lg px-3 py-3 whitespace-pre-wrap">
+              <p className="text-sm text-gray-700 whitespace-pre-wrap">
                 {itemDescription}
               </p>
             </div>

@@ -556,6 +556,8 @@ const buildReadyMadeSubBox = (box, material, idx) => ({
   challan_no: null,
   challan_date: null,
   challan_prepared_by: null,
+  challan_receiver_name: null,
+  challan_receiver_address: null,
   challan_item_name: null,
   challan_item_description: null,
   challan_remarks: null,
