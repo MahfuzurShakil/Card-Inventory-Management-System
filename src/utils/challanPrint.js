@@ -28,7 +28,7 @@ function formatDate(value) {
   return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-function buildChallanHtml(challanData, items = [], assets = {}) {
+function buildChallanHtml(challanData, items = [], assets = {}, options = {}) {
   const totalQty = items.reduce((sum, sb) => sum + (sb.quantity || 0), 0);
   const itemName = challanData.item_name || 'Smart Blank Card';
   const itemDescription = challanData.item_description || '';
@@ -37,6 +37,7 @@ function buildChallanHtml(challanData, items = [], assets = {}) {
   const receiverAddress = challanData.receiver_address || '-';
   const logoUrl = assets.logo || '';
   const watermarkUrl = assets.watermark || '';
+  const autoPrint = options.autoPrint !== false;
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8"/>
 <title>Delivery Challan ${escapeHtml(challanData.challan_no)}</title>
@@ -44,9 +45,6 @@ function buildChallanHtml(challanData, items = [], assets = {}) {
   *{margin:0;padding:0;box-sizing:border-box;}
   body{font-family:'Segoe UI',Arial,sans-serif;color:#111827;background:#fff;padding:14px;}
   .challan{position:relative;max-width:790px;margin:0 auto;background:#fff;border:1px solid #d1d5db;overflow:hidden;}
-  .watermark{position:absolute;inset:112px 0 68px;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:0;}
-  .watermark img{width:320px;max-width:54%;opacity:.075;object-fit:contain;}
-  .layer{position:relative;z-index:1;}
   .header{padding:12px 16px 10px;border-bottom:1px solid #cbd5e1;}
   .header-row{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;}
   .brand{display:flex;gap:10px;align-items:flex-start;min-width:0;flex:1;}
@@ -84,7 +82,7 @@ function buildChallanHtml(challanData, items = [], assets = {}) {
 </style>
 </head><body>
 <div class="challan">
-  <div class="header layer">
+  <div class="header">
     <div class="header-row">
       <div class="brand">
         ${logoUrl ? `<img class="brand-logo" src="${escapeHtml(logoUrl)}" alt="Onestra logo"/>` : ''}
@@ -102,7 +100,7 @@ function buildChallanHtml(challanData, items = [], assets = {}) {
       </div>
     </div>
   </div>
-  <div class="body layer">
+  <div class="body">
     <div class="body-stack">
       <div class="body-watermark">${watermarkUrl ? `<img src="${escapeHtml(watermarkUrl)}" alt="Onestra watermark"/>` : ''}</div>
       <div class="body-content">
@@ -142,7 +140,7 @@ function buildChallanHtml(challanData, items = [], assets = {}) {
       </div>
     </div>
   </div>
-  <div class="footer layer">
+  <div class="footer">
     <div class="footer-note">
       This is a system-generated challan from Onestra ERP.<br/>
       Generated: ${escapeHtml(formatPrintedAt())}
@@ -157,15 +155,19 @@ function buildChallanHtml(challanData, items = [], assets = {}) {
     </div>
   </div>
 </div>
-<script>window.onload=function(){setTimeout(function(){window.print();},400);};</script>
+${autoPrint ? '<script>window.onload=function(){setTimeout(function(){window.print();},400);};</script>' : ''}
 </body></html>`;
 }
 
-function openChallanPrint(challanData, items = []) {
-  const html = buildChallanHtml(challanData, items, {
+function getChallanDocumentHtml(challanData, items = [], options = {}) {
+  return buildChallanHtml(challanData, items, {
     logo: new URL('/onestra-logo.png', window.location.origin).href,
     watermark: new URL('/onestra-challan-watermark.png', window.location.origin).href,
-  });
+  }, options);
+}
+
+function openChallanPrint(challanData, items = []) {
+  const html = getChallanDocumentHtml(challanData, items, { autoPrint: true });
   const printWindow = window.open('', '_blank', 'width=900,height=800');
 
   if (!printWindow) return;
@@ -183,4 +185,4 @@ function generateChallanNo() {
   return `CH-${y}${m}-${rand}`;
 }
 
-export { COMPANY, generateChallanNo, openChallanPrint };
+export { COMPANY, generateChallanNo, getChallanDocumentHtml, openChallanPrint };
