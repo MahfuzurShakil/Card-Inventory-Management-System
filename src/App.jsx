@@ -627,6 +627,7 @@ const [shiftSummaries, setShiftSummaries] = useState([]);
 
   // Navigation Handler with shift context support
   const [shiftContext, setShiftContext] = useState(null);
+  const [recordOutputContext, setRecordOutputContext] = useState(null);
 
   // Finance state
 const [localCosts, setLocalCosts] = useState([]);
@@ -659,7 +660,8 @@ const [selectedChallan, setSelectedChallan] = useState(null);
     if (employee) setSelectedEmployee(employee);
     if (box) setSelectedBox(box);
     if (subBox) setSelectedSubBox(subBox);
-    if (context) setShiftContext(context);
+    setShiftContext(nextView === 'production-floor' ? context : null);
+    setRecordOutputContext(nextView === 'subbox-creation' ? context : null);
     
     // Handle shipment navigation
     if (view === 'shipment-detail' && material && lc) {
@@ -1003,6 +1005,8 @@ const handleSaveAssignments = (assignments) => {
       const newBoxes = materialBoxes.map((box, idx) => ({
         id: Date.now() + idx + Math.random(),
         inbound_material_id: material.id,
+        lc_id:               material.lc_id,
+        lc_number:           material.lc_number,
         shipment_id:         material.shipment_id,
         shipment_number:     box.shipment_number || material.shipment_number,
         box_name:            box.box_name,
@@ -1050,6 +1054,8 @@ const handleSaveAssignments = (assignments) => {
     const newBoxes = boxesData.map((box, idx) => ({
       ...box,
       id: Date.now() + idx,
+      lc_id: inboundMaterials.find(im => im.id === box.inbound_material_id)?.lc_id ?? box.lc_id ?? null,
+      lc_number: inboundMaterials.find(im => im.id === box.inbound_material_id)?.lc_number ?? box.lc_number ?? null,
       consumed_quantity: 0,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
@@ -1604,7 +1610,10 @@ case 'shift-assignment':
     <SubBoxList 
       subBoxes={subBoxes}
       boxes={boxes}
-      onCreateSubBox={() => navigate('subbox-creation')}
+      shiftSummaries={shiftSummaries}
+      inboundMaterials={inboundMaterials}
+      lcs={lcs}
+      onCreateSubBox={(context) => navigate('subbox-creation', null, null, null, null, null, context)}
       onViewSubBox={(subBox) => navigate('subbox-detail', null, null, null, null, subBox)}
       onRecordRejection={(subBox) => navigate('client-rejection', null, null, null, null, subBox)}
       onNavigate={navigate}
@@ -1641,6 +1650,9 @@ case 'subbox-creation':
       boxes={boxes}
       subBoxes={subBoxes}
       shiftSummaries={shiftSummaries}
+      inboundMaterials={inboundMaterials}
+      lcs={lcs}
+      recordOutputContext={recordOutputContext}
     />
   );
       case 'client-rejection':

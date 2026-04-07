@@ -72,7 +72,7 @@ const ChallanConfirmModal = ({ challan, boxes, onSkip, onPrint }) => {
 
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl h-[96vh] flex flex-col">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[96vh] flex flex-col">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 flex-shrink-0">
           <div>
             <div className="flex items-center gap-2 mb-1">
@@ -85,12 +85,12 @@ const ChallanConfirmModal = ({ challan, boxes, onSkip, onPrint }) => {
           </div>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-hidden px-5 py-4 bg-gray-100">
-          <div className="max-w-[860px] h-full mx-auto border border-gray-300 rounded-xl overflow-hidden bg-white shadow-sm">
+        <div className="overflow-y-auto flex-1 px-5 py-4 bg-gray-100">
+          <div className="max-w-[860px] mx-auto border border-gray-300 rounded-xl overflow-hidden bg-white shadow-sm">
             <iframe
               title="Challan preview"
               srcDoc={previewHtml}
-              className="w-full h-full bg-white"
+              className="w-full h-[56rem] bg-white"
             />
           </div>
         </div>
@@ -198,7 +198,7 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
     }
 
     if (!found.barcode) {
-      setScanError('This is a partial box - no barcode yet');
+      setScanError('This is a partial box and cannot be added to a challan yet.');
       setScanValue('');
       return;
     }
@@ -567,7 +567,7 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
             <div className="flex items-start gap-2 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl">
               <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
               <p className="text-xs text-amber-800">
-                <span className="font-semibold">Partial boxes</span> cannot be added to a challan - they have no barcode yet.
+                <span className="font-semibold">Partial boxes</span> cannot be added to a challan until they are finalized.
                 Close them first on the Sub-Box Creation page.
               </p>
             </div>

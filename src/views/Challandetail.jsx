@@ -13,13 +13,13 @@ function fmtDate(val) {
   return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-const InfoItem = ({ label, value, mono = false, icon }) => (
+const InfoItem = ({ label, value, mono = false, icon, multiline = false }) => (
   <div className="space-y-1">
     <p className="text-xs text-gray-500 uppercase font-medium flex items-center gap-1.5">
       {icon}
       {label}
     </p>
-    <p className={`text-sm font-semibold text-gray-900 ${mono ? 'font-mono' : ''}`}>{value}</p>
+    <p className={`text-sm font-semibold text-gray-900 ${mono ? 'font-mono' : ''} ${multiline ? 'whitespace-pre-wrap' : ''}`}>{value}</p>
   </div>
 );
 
@@ -130,52 +130,47 @@ const ChallanDetail = ({ challan, onBack, onMarkDelivered }) => {
           </div>
         </div>
 
-        <div className="p-6 space-y-5">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
-            <InfoItem icon={<FileText className="w-3.5 h-3.5 text-gray-400" />} label="Challan No." value={challan.challan_no} mono />
-            <InfoItem icon={<Calendar className="w-3.5 h-3.5 text-gray-400" />} label="Date" value={fmtDate(challan.date)} />
-            <InfoItem icon={<User className="w-3.5 h-3.5 text-gray-400" />} label="Prepared By" value={challan.prepared_by || '-'} />
-            <InfoItem icon={<Package className="w-3.5 h-3.5 text-gray-400" />} label="Item Name" value={challan.item_name || 'Smart Blank Card'} />
-            <InfoItem icon={<Package className="w-3.5 h-3.5 text-gray-400" />} label="Number of Box" value={boxes.length.toLocaleString()} />
-            <InfoItem icon={<Layers className="w-3.5 h-3.5 text-gray-400" />} label="Total Quantity" value={totalQty.toLocaleString()} />
-            <div className="space-y-1">
-              <p className="text-xs text-gray-500 uppercase font-medium flex items-center gap-1.5">
-                <Truck className="w-3.5 h-3.5 text-gray-400" />
-                Status
-              </p>
-              <span className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-full ${
-                challanStatus === 'delivered' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-              }`}>
-                <Truck className="w-3 h-3" /> {challanStatus === 'delivered' ? 'Delivered' : 'Pending'}
-              </span>
+        <div className="p-6">
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <h3 className="text-base font-semibold text-gray-900 mb-4">Challan Information</h3>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
+              <InfoItem icon={<FileText className="w-3.5 h-3.5 text-gray-400" />} label="Challan No." value={challan.challan_no} mono />
+              <InfoItem icon={<Calendar className="w-3.5 h-3.5 text-gray-400" />} label="Date" value={fmtDate(challan.date)} />
+              <InfoItem icon={<User className="w-3.5 h-3.5 text-gray-400" />} label="Prepared By" value={challan.prepared_by || '-'} />
+              <div className="space-y-1">
+                <p className="text-xs text-gray-500 uppercase font-medium flex items-center gap-1.5">
+                  <Truck className="w-3.5 h-3.5 text-gray-400" />
+                  Status
+                </p>
+                <span className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-full ${
+                  challanStatus === 'delivered' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                }`}>
+                  <Truck className="w-3 h-3" /> {challanStatus === 'delivered' ? 'Delivered' : 'Pending'}
+                </span>
+              </div>
+
+              <InfoItem icon={<Building2 className="w-3.5 h-3.5 text-gray-400" />} label="Receiver Name" value={challan.receiver_name || '-'} />
+              <div className="md:col-span-2 xl:col-span-3">
+                <InfoItem icon={<MapPin className="w-3.5 h-3.5 text-gray-400" />} label="Receiver Address" value={challan.receiver_address || '-'} multiline />
+              </div>
+
+              <InfoItem icon={<Package className="w-3.5 h-3.5 text-gray-400" />} label="Item Name" value={challan.item_name || 'Smart Blank Card'} />
+              <InfoItem icon={<Package className="w-3.5 h-3.5 text-gray-400" />} label="Number of Boxes" value={boxes.length.toLocaleString()} />
+              <InfoItem icon={<Layers className="w-3.5 h-3.5 text-gray-400" />} label="Quantity" value={totalQty.toLocaleString()} />
+
+              {itemDescription && (
+                <div className="md:col-span-2 xl:col-span-4">
+                  <InfoItem
+                    icon={<FileText className="w-3.5 h-3.5 text-gray-400" />}
+                    label="Item Description"
+                    value={itemDescription}
+                    multiline
+                  />
+                </div>
+              )}
             </div>
           </div>
-
-          <div className="border-t border-gray-200 pt-4 space-y-3">
-            <div className="flex items-start gap-3 text-sm">
-              <p className="w-36 text-xs text-gray-500 uppercase font-medium flex items-center gap-1.5 pt-0.5">
-                <Building2 className="w-3.5 h-3.5 text-gray-400" />
-                Receiver Name
-              </p>
-              <p className="flex-1 font-semibold text-gray-900">{challan.receiver_name || '-'}</p>
-            </div>
-            <div className="flex items-start gap-3 text-sm">
-              <p className="w-36 text-xs text-gray-500 uppercase font-medium flex items-center gap-1.5 pt-0.5">
-                <MapPin className="w-3.5 h-3.5 text-gray-400" />
-                Receiver Address
-              </p>
-              <p className="flex-1 text-gray-700 whitespace-pre-wrap">{challan.receiver_address || '-'}</p>
-            </div>
-          </div>
-
-          {itemDescription && (
-            <div className="border-t border-gray-200 pt-4">
-              <p className="text-xs text-gray-500 uppercase font-medium mb-1.5">Item Description</p>
-              <p className="text-sm text-gray-700 whitespace-pre-wrap">
-                {itemDescription}
-              </p>
-            </div>
-          )}
         </div>
       </div>
 

@@ -4,6 +4,7 @@ import {
   Barcode, Printer, X, CheckSquare, Square, ChevronLeft, ChevronRight,
   FileText, Package, Truck
 } from 'lucide-react';
+import RecordOutputEntryModal from '../components/RecordOutputEntryModal';
 
 // ── Code 128B engine ──────────────────────────────────────────────────────────
 const C128 = [
@@ -246,7 +247,17 @@ const SourceTypeBadge = ({ sourceType }) => (
 );
 
 // ── Main Component ────────────────────────────────────────────────────────────
-const SubBoxList = ({ subBoxes, boxes, onCreateSubBox, onViewSubBox, onRecordRejection, onCreateChallan }) => {
+const SubBoxList = ({
+  subBoxes,
+  boxes,
+  shiftSummaries = [],
+  inboundMaterials = [],
+  lcs = [],
+  onCreateSubBox,
+  onViewSubBox,
+  onRecordRejection,
+  onCreateChallan,
+}) => {
   const [searchTerm, setSearchTerm]             = useState('');
   const [outputTypeFilter, setOutputTypeFilter] = useState('all');
   const [shiftFilter, setShiftFilter]           = useState('all');
@@ -255,6 +266,7 @@ const SubBoxList = ({ subBoxes, boxes, onCreateSubBox, onViewSubBox, onRecordRej
   const [currentPage, setCurrentPage]           = useState(1);
   const [selectedIds, setSelectedIds]           = useState([]);
   const [printModalSubs, setPrintModalSubs]     = useState(null);
+  const [showRecordOutputModal, setShowRecordOutputModal] = useState(false);
   const itemsPerPage = 10;
 
   // ── Filtering ─────────────────────────────────────────────────────────────
@@ -308,6 +320,15 @@ const SubBoxList = ({ subBoxes, boxes, onCreateSubBox, onViewSubBox, onRecordRej
     if (onCreateChallan) onCreateChallan(selectedIds);
   };
 
+  const handleOpenRecordOutput = () => {
+    setShowRecordOutputModal(true);
+  };
+
+  const handleContinueRecordOutput = (context) => {
+    setShowRecordOutputModal(false);
+    onCreateSubBox?.(context);
+  };
+
   // ── Stats ─────────────────────────────────────────────────────────────────
   const totalSubBoxes   = subBoxes.length;
   const fullCount       = subBoxes.filter(sb => (sb.box_type || 'Full') === 'Full').length;
@@ -324,6 +345,17 @@ const SubBoxList = ({ subBoxes, boxes, onCreateSubBox, onViewSubBox, onRecordRej
   return (
     <div className="space-y-6">
       {printModalSubs && <BarcodePrintModal subBoxes={printModalSubs} onClose={() => setPrintModalSubs(null)} />}
+      {showRecordOutputModal && (
+        <RecordOutputEntryModal
+          boxes={boxes}
+          subBoxes={subBoxes}
+          shiftSummaries={shiftSummaries}
+          inboundMaterials={inboundMaterials}
+          lcs={lcs}
+          onClose={() => setShowRecordOutputModal(false)}
+          onContinue={handleContinueRecordOutput}
+        />
+      )}
 
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between">
@@ -349,7 +381,7 @@ const SubBoxList = ({ subBoxes, boxes, onCreateSubBox, onViewSubBox, onRecordRej
             </button>
           )}
           <button
-            onClick={onCreateSubBox}
+            onClick={handleOpenRecordOutput}
             className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors text-sm font-semibold"
           >
             <Plus className="w-4 h-4" /> Record Output
@@ -387,7 +419,7 @@ const SubBoxList = ({ subBoxes, boxes, onCreateSubBox, onViewSubBox, onRecordRej
         <div className="flex items-center gap-3 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl">
           <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0" />
           <p className="text-xs text-amber-800">
-            <span className="font-semibold">{partialCount} partial box{partialCount !== 1 ? 'es' : ''}</span> in progress — no barcode until filled.
+            <span className="font-semibold">{partialCount} partial box{partialCount !== 1 ? 'es' : ''}</span> in progress — QC partials can print labels, but remain open until filled or closed.
             Partial boxes and already prepared boxes cannot be selected for new challans.
           </p>
         </div>
@@ -519,7 +551,7 @@ const SubBoxList = ({ subBoxes, boxes, onCreateSubBox, onViewSubBox, onRecordRej
                           {sb.sub_box_name || sb.box_name || '—'}
                         </span>
                         {isPartial && (
-                          <span className="text-xs text-amber-500" title="No barcode until filled">⚠</span>
+                          <span className="text-xs text-amber-500" title="Partial box is still open">⚠</span>
                         )}
                       </div>
                     </td>
@@ -615,7 +647,7 @@ const SubBoxList = ({ subBoxes, boxes, onCreateSubBox, onViewSubBox, onRecordRej
                         <button
                           onClick={() => printOne(sb)}
                           disabled={!sb.barcode}
-                          title={sb.barcode ? 'Print Label' : 'No barcode — partial box'}
+                          title={sb.barcode ? 'Print Label' : 'Print unavailable'}
                           className={`p-1.5 rounded transition-colors ${
                             sb.barcode
                               ? 'text-blue-600 hover:bg-blue-50'
@@ -656,7 +688,7 @@ const SubBoxList = ({ subBoxes, boxes, onCreateSubBox, onViewSubBox, onRecordRej
                           <Layers className="w-12 h-12 mx-auto mb-3 text-gray-300" />
                           <p className="mb-4">No production output recorded yet.</p>
                           <button
-                            onClick={onCreateSubBox}
+                            onClick={handleOpenRecordOutput}
                             className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
                           >
                             Record First Output
