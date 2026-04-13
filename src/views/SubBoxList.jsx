@@ -5,6 +5,8 @@ import {
   FileText, Package, Truck
 } from 'lucide-react';
 import RecordOutputEntryModal from '../components/RecordOutputEntryModal';
+import FinishedGoodsLabelPreview from '../components/FinishedGoodsLabelPreview';
+import { openFinishedGoodsPrintWindow } from '../utils/finishedGoodsLabels';
 
 // ── Code 128B engine ──────────────────────────────────────────────────────────
 const C128 = [

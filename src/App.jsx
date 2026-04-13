@@ -53,6 +53,7 @@ import CreateChallan from './views/CreateChallan';
 // Finance imports
 import FinanceDashboard from './views/FinanceDashboard';
 import LocalCosts from './views/LocalCosts';
+import LandingCostShipment from './views/LandingCostShipment';
 
 import ShiftRosterList from './views/ShiftRosterList';
 
@@ -159,6 +160,7 @@ const ROLE_VIEW_ACCESS = {
     'challan-detail',
     'finance-dashboard',
     'landing-cost',
+    'landing-cost-shipment',
     'local-costs',
   ],
   procurement: [
@@ -194,7 +196,7 @@ const ROLE_VIEW_ACCESS = {
     'shift-roster-list',
     'shift-assignment',
   ],
-  finance: ['finance-dashboard', 'landing-cost', 'local-costs'],
+  finance: ['finance-dashboard', 'landing-cost', 'landing-cost-shipment', 'local-costs'],
 };
 
 const APP_MENU_ITEMS = [
@@ -664,7 +666,7 @@ const [selectedChallan, setSelectedChallan] = useState(null);
     setRecordOutputContext(nextView === 'subbox-creation' ? context : null);
     
     // Handle shipment navigation
-    if (view === 'shipment-detail' && material && lc) {
+    if ((view === 'shipment-detail' || view === 'landing-cost-shipment') && material && lc) {
       setSelectedShipment(material);
     }
   };
@@ -1320,8 +1322,54 @@ const handleMarkChallanDelivered = (challanNo) => {
   );
 };
 
-const handlePaymentSave = (finKey, payments) => {
-  setFinanceData(prev => ({ ...prev, [finKey]: payments }));
+const buildPaymentEntry = (paymentData, existingPayment = null) => {
+  const timestamp = new Date().toISOString();
+
+  return {
+    id: existingPayment?.id || Date.now() + Math.random(),
+    amount: Number(paymentData.amount) || 0,
+    discount: Number(paymentData.discount) || 0,
+    date: paymentData.date || new Date().toISOString().split('T')[0],
+    ref: paymentData.ref || '',
+    note: paymentData.note || '',
+    file: paymentData.file || null,
+    created_at: existingPayment?.created_at || timestamp,
+    updated_at: timestamp,
+  };
+};
+
+const handlePaymentSave = (finKey, paymentData) => {
+  const entry = buildPaymentEntry(paymentData);
+  setFinanceData(prev => ({
+    ...prev,
+    [finKey]: [...(prev[finKey] || []), entry],
+  }));
+};
+
+const handlePaymentEdit = (finKey, paymentId, paymentData) => {
+  setFinanceData(prev => ({
+    ...prev,
+    [finKey]: (prev[finKey] || []).map(payment =>
+      payment.id === paymentId ? buildPaymentEntry(paymentData, payment) : payment
+    ),
+  }));
+};
+
+const handlePaymentDelete = (finKey, paymentId) => {
+  if (!window.confirm('Are you sure you want to delete this payment entry?')) {
+    return;
+  }
+
+  setFinanceData(prev => {
+    const nextPayments = (prev[finKey] || []).filter(payment => payment.id !== paymentId);
+
+    if (nextPayments.length === 0) {
+      const { [finKey]: _removed, ...rest } = prev;
+      return rest;
+    }
+
+    return { ...prev, [finKey]: nextPayments };
+  });
 };
 
   const renderProcurementDashboard = () => (
@@ -1723,8 +1771,28 @@ case 'production-floor':
       lcs={lcs}
       financeData={financeData}
       onPaymentSave={handlePaymentSave}
+      onPaymentEdit={handlePaymentEdit}
+      onPaymentDelete={handlePaymentDelete}
+      onOpenShipment={(lc, shipment) => {
+        setSelectedLC(lc);
+        setSelectedShipment(shipment);
+        setCurrentView('landing-cost-shipment');
+      }}
     />
   );
+
+  case 'landing-cost-shipment':
+  return selectedLC && selectedShipment ? (
+    <LandingCostShipment
+      lc={selectedLC}
+      shipment={selectedShipment}
+      financeData={financeData}
+      onPaymentSave={handlePaymentSave}
+      onPaymentEdit={handlePaymentEdit}
+      onPaymentDelete={handlePaymentDelete}
+      onBack={() => navigate('landing-cost')}
+    />
+  ) : null;
 
 case 'local-costs':
   return (

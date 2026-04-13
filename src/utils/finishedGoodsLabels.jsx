@@ -27,10 +27,10 @@ function encode128(text) {
   let checksum = 104;
   const parts = [CODE128_PATTERNS[104]];
 
-  for (let i = 0; i < text.length; i += 1) {
-    const value = text.charCodeAt(i) - 32;
+  for (let index = 0; index < text.length; index += 1) {
+    const value = text.charCodeAt(index) - 32;
     if (value < 0 || value > 94) continue;
-    checksum += value * (i + 1);
+    checksum += value * (index + 1);
     parts.push(CODE128_PATTERNS[value]);
   }
 
@@ -45,8 +45,8 @@ function barcodeBase64(value, width = 520, height = 110, fontSize = 13) {
   let rects = '';
   let x = 0;
 
-  for (let i = 0; i < bits.length; i += 1) {
-    if (bits[i] === '1') {
+  for (let index = 0; index < bits.length; index += 1) {
+    if (bits[index] === '1') {
       rects += `<rect x="${x.toFixed(3)}" y="0" width="${moduleWidth.toFixed(3)}" height="${barHeight}" fill="#000"/>`;
     }
     x += moduleWidth;
@@ -59,49 +59,75 @@ function barcodeBase64(value, width = 520, height = 110, fontSize = 13) {
   return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`;
 }
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function getRangeLabel(dateFrom, dateTo) {
   if (dateFrom && dateTo && dateFrom !== dateTo) return `${dateFrom} to ${dateTo}`;
   return dateTo || dateFrom || 'Date pending';
-}
-
-export function getFinishedGoodsContextLine(subBox) {
-  const isGood = subBox.output_type === 'Good/ QC Approved';
-
-  if (isGood) {
-    const parts = ['QC Approved'];
-    if (subBox.production_date) parts.push(subBox.production_date);
-    if (subBox.shift) parts.push(subBox.shift);
-    return parts.join(' | ');
-  }
-
-  const parts = ['Wastage'];
-  if (subBox.lc_number) parts.push(subBox.lc_number);
-  parts.push(getRangeLabel(subBox.date_from, subBox.date_to || subBox.production_date));
-  return parts.join(' | ');
 }
 
 export function getFinishedGoodsDisplayName(subBox) {
   return subBox.sub_box_name || subBox.box_name || subBox.barcode || 'Unnamed Sub-Box';
 }
 
-export function openFinishedGoodsPrintWindow(subBoxes) {
-  const labels = subBoxes.map((subBox) => {
-    const src = barcodeBase64(subBox.barcode);
+export function getFinishedGoodsLabelCode(subBox) {
+  if (subBox.sourceType === 'ready_made') return 'RM';
+  if (subBox.output_type === 'Wastage') return 'WST';
+  return subBox.shift || 'QC';
+}
 
-    return `
+export function getFinishedGoodsMetaLine(subBox) {
+  if (subBox.sourceType === 'ready_made') {
+    const shipment = subBox.shipment_number || 'Shipment pending';
+    const lc = subBox.lc_number || 'LC pending';
+    return `Shipment: ${shipment} | LC: ${lc}`;
+  }
+
+  if (subBox.output_type === 'Wastage') {
+    const lc = subBox.lc_number || 'LC pending';
+    return `LC: ${lc} | ${getRangeLabel(subBox.date_from, subBox.date_to || subBox.production_date)}`;
+  }
+
+  const shipment = subBox.shipment_number || 'Shipment pending';
+  const productionDate = subBox.production_date || 'Date pending';
+  return `Shipment: ${shipment} | ${productionDate}`;
+}
+
+export function getFinishedGoodsContextLine(subBox) {
+  return getFinishedGoodsMetaLine(subBox);
+}
+
+export function getFinishedGoodsQuantityLabel(subBox) {
+  return `Qty: ${(subBox.quantity || 0).toLocaleString()}`;
+}
+
+function getFinishedGoodsLabelMarkup(subBox) {
+  const src = barcodeBase64(subBox.barcode);
+
+  return `
     <div class="label">
       <div class="top-row">
         <span class="label-title">Finished Goods Label</span>
-        <span class="label-code">${subBox.output_type === 'Good/ QC Approved' ? (subBox.shift || 'QC') : (subBox.lc_number || 'WST')}</span>
+        <span class="label-code">${escapeHtml(getFinishedGoodsLabelCode(subBox))}</span>
       </div>
-      <div class="box-name">${getFinishedGoodsDisplayName(subBox)}</div>
-      <img class="bc" src="${src}" alt="${subBox.barcode}" />
+      <div class="box-name">${escapeHtml(getFinishedGoodsDisplayName(subBox))}</div>
+      <img class="bc" src="${src}" alt="${escapeHtml(subBox.barcode)}" />
       <div class="meta">
-        <span><b>Context:</b> ${getFinishedGoodsContextLine(subBox)}</span>
-        <span><b>Qty:</b> ${(subBox.quantity || 0).toLocaleString()}</span>
+        <span>${escapeHtml(getFinishedGoodsMetaLine(subBox))}</span>
+        <span>${escapeHtml(getFinishedGoodsQuantityLabel(subBox))}</span>
       </div>
     </div>`;
-  }).join('');
+}
+
+export function openFinishedGoodsPrintWindow(subBoxes) {
+  const labels = subBoxes.map(getFinishedGoodsLabelMarkup).join('');
 
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/>
 <title>Finished Goods Labels</title>
@@ -110,21 +136,65 @@ export function openFinishedGoodsPrintWindow(subBoxes) {
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: Arial, sans-serif; background: #fff; }
   .label {
-    width: 100mm; height: 60mm; padding: 3mm 4mm;
-    display: flex; flex-direction: column; justify-content: space-between;
-    page-break-after: always; background: #fff; overflow: hidden;
+    width: 100mm;
+    height: 60mm;
+    padding: 4mm 5mm 3mm 5mm;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    page-break-after: always;
+    background: #fff;
+    overflow: hidden;
   }
   .label:last-child { page-break-after: avoid; }
-  .top-row { display: flex; justify-content: space-between; align-items: center; }
-  .label-title { font-size: 7pt; font-weight: 700; color: #6b7280; letter-spacing: 1.5px; text-transform: uppercase; }
-  .label-code { font-size: 7pt; color: #9ca3af; }
-  .box-name { font-size: 13pt; font-weight: 800; color: #111827; text-align: center; letter-spacing: 0.5px; }
-  .bc { width: 100%; height: auto; display: block; max-height: 26mm; }
-  .meta {
-    display: flex; justify-content: space-between; gap: 3mm;
-    font-size: 8pt; color: #374151; border-top: 0.5pt solid #e5e7eb; padding-top: 1.5mm;
+  .top-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1mm;
   }
-  .meta span:first-child { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .label-title {
+    font-size: 8pt;
+    font-weight: 700;
+    color: #555;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  .label-code {
+    font-size: 8pt;
+    color: #555;
+    font-weight: 600;
+  }
+  .box-name {
+    font-size: 15pt;
+    font-weight: 800;
+    color: #111827;
+    text-align: center;
+    letter-spacing: 0.3px;
+    line-height: 1.1;
+  }
+  .bc {
+    width: 100%;
+    height: auto;
+    display: block;
+    max-height: 22mm;
+  }
+  .meta {
+    display: flex;
+    justify-content: space-between;
+    gap: 3mm;
+    font-size: 9pt;
+    font-weight: 600;
+    color: #222;
+    border-top: 0.6pt solid #ccc;
+    padding-top: 1.5mm;
+  }
+  .meta span:first-child {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   @media print { body { margin: 0; } }
 </style>
 </head><body>

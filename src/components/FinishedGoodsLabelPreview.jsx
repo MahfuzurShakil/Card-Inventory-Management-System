@@ -1,4 +1,9 @@
-import { getFinishedGoodsContextLine, getFinishedGoodsDisplayName } from '../utils/finishedGoodsLabels';
+import {
+  getFinishedGoodsDisplayName,
+  getFinishedGoodsLabelCode,
+  getFinishedGoodsMetaLine,
+  getFinishedGoodsQuantityLabel,
+} from '../utils/finishedGoodsLabels';
 
 const CODE128_PATTERNS = [
   '11011001100', '11001101100', '11001100110', '10010011000', '10010001100',
@@ -89,8 +94,8 @@ function FinishedGoodsLabelPreview({ subBox }) {
         <span className="text-gray-400 font-bold uppercase tracking-widest" style={{ fontSize: 8 }}>
           Finished Goods Label
         </span>
-        <span className="text-gray-300 text-right" style={{ fontSize: 8 }}>
-          {subBox.output_type === 'Good/ QC Approved' ? (subBox.shift || 'QC') : (subBox.lc_number || 'WST')}
+        <span className="text-gray-300" style={{ fontSize: 8 }}>
+          {getFinishedGoodsLabelCode(subBox)}
         </span>
       </div>
 
@@ -103,8 +108,8 @@ function FinishedGoodsLabelPreview({ subBox }) {
       </div>
 
       <div className="flex justify-between text-gray-600 border-t border-gray-100 pt-1 gap-3" style={{ fontSize: 9 }}>
-        <span className="truncate"><b>Context:</b> {getFinishedGoodsContextLine(subBox)}</span>
-        <span className="shrink-0"><b>Qty:</b> {(subBox.quantity || 0).toLocaleString()}</span>
+        <span className="truncate">{getFinishedGoodsMetaLine(subBox)}</span>
+        <span className="shrink-0">{getFinishedGoodsQuantityLabel(subBox)}</span>
       </div>
     </div>
   );
