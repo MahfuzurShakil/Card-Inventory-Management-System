@@ -54,6 +54,7 @@ import CreateChallan from './views/CreateChallan';
 import FinanceDashboard from './views/FinanceDashboard';
 import LocalCosts from './views/LocalCosts';
 import LandingCostShipment from './views/LandingCostShipment';
+import LandingCostLCDetail from './views/LandingCostLCDetail';
 
 import ShiftRosterList from './views/ShiftRosterList';
 
@@ -160,6 +161,7 @@ const ROLE_VIEW_ACCESS = {
     'challan-detail',
     'finance-dashboard',
     'landing-cost',
+    'landing-cost-lc-detail',
     'landing-cost-shipment',
     'local-costs',
   ],
@@ -196,7 +198,7 @@ const ROLE_VIEW_ACCESS = {
     'shift-roster-list',
     'shift-assignment',
   ],
-  finance: ['finance-dashboard', 'landing-cost', 'landing-cost-shipment', 'local-costs'],
+  finance: ['finance-dashboard', 'landing-cost', 'landing-cost-lc-detail', 'landing-cost-shipment', 'local-costs'],
 };
 
 const APP_MENU_ITEMS = [
@@ -1661,7 +1663,7 @@ case 'shift-assignment':
       shiftSummaries={shiftSummaries}
       inboundMaterials={inboundMaterials}
       lcs={lcs}
-      onCreateSubBox={(context) => navigate('subbox-creation', null, null, null, null, null, context)}
+      onCreateSubBox={() => navigate('subbox-creation')}
       onViewSubBox={(subBox) => navigate('subbox-detail', null, null, null, null, subBox)}
       onRecordRejection={(subBox) => navigate('client-rejection', null, null, null, null, subBox)}
       onNavigate={navigate}
@@ -1770,16 +1772,29 @@ case 'production-floor':
     <LandingCost
       lcs={lcs}
       financeData={financeData}
-      onPaymentSave={handlePaymentSave}
-      onPaymentEdit={handlePaymentEdit}
-      onPaymentDelete={handlePaymentDelete}
+      onOpenLC={(lc) => {
+        setSelectedLC(lc);
+        setCurrentView('landing-cost-lc-detail');
+      }}
+    />
+  );
+
+  case 'landing-cost-lc-detail':
+  return selectedLC ? (
+    <LandingCostLCDetail
+      lc={selectedLC}
+      financeData={financeData}
       onOpenShipment={(lc, shipment) => {
         setSelectedLC(lc);
         setSelectedShipment(shipment);
         setCurrentView('landing-cost-shipment');
       }}
+      onPaymentSave={handlePaymentSave}
+      onPaymentEdit={handlePaymentEdit}
+      onPaymentDelete={handlePaymentDelete}
+      onBack={() => navigate('landing-cost')}
     />
-  );
+  ) : null;
 
   case 'landing-cost-shipment':
   return selectedLC && selectedShipment ? (
@@ -1790,7 +1805,7 @@ case 'production-floor':
       onPaymentSave={handlePaymentSave}
       onPaymentEdit={handlePaymentEdit}
       onPaymentDelete={handlePaymentDelete}
-      onBack={() => navigate('landing-cost')}
+      onBack={() => navigate('landing-cost-lc-detail', selectedLC)}
     />
   ) : null;
 

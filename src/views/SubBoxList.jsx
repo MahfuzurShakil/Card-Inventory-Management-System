@@ -4,9 +4,8 @@ import {
   Barcode, Printer, X, CheckSquare, Square, ChevronLeft, ChevronRight,
   FileText, Package, Truck
 } from 'lucide-react';
-import RecordOutputEntryModal from '../components/RecordOutputEntryModal';
 import FinishedGoodsLabelPreview from '../components/FinishedGoodsLabelPreview';
-import { openFinishedGoodsPrintWindow } from '../utils/finishedGoodsLabels';
+import { isFinishedGoodPrintable } from '../utils/recordOutput';
 
 // ── Code 128B engine ──────────────────────────────────────────────────────────
 const C128 = [
@@ -137,7 +136,7 @@ function openPrintWindow(sbList) {
 </style>
 </head><body>
 ${labels}
-<script>window.onload=function(){setTimeout(function(){window.print();},400);};<\/script>
+<script>window.onload=function(){setTimeout(function(){window.print();},400);};</script>
 </body></html>`;
 
   const w = window.open('', '_blank', 'width=900,height=650');
@@ -251,10 +250,6 @@ const SourceTypeBadge = ({ sourceType }) => (
 // ── Main Component ────────────────────────────────────────────────────────────
 const SubBoxList = ({
   subBoxes,
-  boxes,
-  shiftSummaries = [],
-  inboundMaterials = [],
-  lcs = [],
   onCreateSubBox,
   onViewSubBox,
   onRecordRejection,
@@ -268,7 +263,6 @@ const SubBoxList = ({
   const [currentPage, setCurrentPage]           = useState(1);
   const [selectedIds, setSelectedIds]           = useState([]);
   const [printModalSubs, setPrintModalSubs]     = useState(null);
-  const [showRecordOutputModal, setShowRecordOutputModal] = useState(false);
   const itemsPerPage = 10;
 
   // ── Filtering ─────────────────────────────────────────────────────────────
@@ -296,7 +290,7 @@ const SubBoxList = ({
 
   // ── Selection — partial boxes are excluded from select ────────────────────
   const isSelectable  = (sb) =>
-    (sb.box_type || 'Full') !== 'Partial' &&
+    isFinishedGoodPrintable(sb) &&
     (sb.delivery_status || 'delivery_pending') === 'delivery_pending';
   const toggleId      = (id) => {
     const sb = subBoxes.find(b => b.id === id);
@@ -312,9 +306,9 @@ const SubBoxList = ({
   };
 
   // Print — only full boxes have barcodes
-  const printOne = (sb) => { if (sb.barcode) setPrintModalSubs([sb]); };
+  const printOne = (sb) => { if (isFinishedGoodPrintable(sb)) setPrintModalSubs([sb]); };
   const printSel = ()   => {
-    const printable = subBoxes.filter(b => selectedIds.includes(b.id) && b.barcode);
+    const printable = subBoxes.filter(b => selectedIds.includes(b.id) && isFinishedGoodPrintable(b));
     if (printable.length) setPrintModalSubs(printable);
   };
 
@@ -323,12 +317,7 @@ const SubBoxList = ({
   };
 
   const handleOpenRecordOutput = () => {
-    setShowRecordOutputModal(true);
-  };
-
-  const handleContinueRecordOutput = (context) => {
-    setShowRecordOutputModal(false);
-    onCreateSubBox?.(context);
+    onCreateSubBox?.();
   };
 
   // ── Stats ─────────────────────────────────────────────────────────────────
@@ -347,17 +336,6 @@ const SubBoxList = ({
   return (
     <div className="space-y-6">
       {printModalSubs && <BarcodePrintModal subBoxes={printModalSubs} onClose={() => setPrintModalSubs(null)} />}
-      {showRecordOutputModal && (
-        <RecordOutputEntryModal
-          boxes={boxes}
-          subBoxes={subBoxes}
-          shiftSummaries={shiftSummaries}
-          inboundMaterials={inboundMaterials}
-          lcs={lcs}
-          onClose={() => setShowRecordOutputModal(false)}
-          onContinue={handleContinueRecordOutput}
-        />
-      )}
 
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between">
@@ -400,16 +378,16 @@ const SubBoxList = ({
           { label: 'Wastage Rate',    value: `${wastagePercentage}%`, icon: AlertTriangle, ibg: parseFloat(wastagePercentage)>5?'bg-red-100':'bg-emerald-100', icl: parseFloat(wastagePercentage)>5?'text-red-600':'text-emerald-600', vcl: 'text-gray-900', sub: null },
           { label: 'Client Rejected', value: totalRejected,      icon: AlertTriangle, ibg: 'bg-orange-100', icl: 'text-orange-600', vcl: 'text-orange-900', sub: 'units' },
           { label: 'Ready to Deliver', value: readyCount,        icon: Truck,         ibg: 'bg-blue-100',   icl: 'text-blue-600',  vcl: 'text-blue-900',   sub: `${deliveredCount} delivered` },
-        ].map(({ label, value, sub, icon: Icon, ibg, icl, vcl }) => (
-          <div key={label} className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+        ].map((item) => (
+          <div key={item.label} className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <p className="text-xs font-medium text-gray-500 truncate">{label}</p>
-                <p className={`text-2xl font-bold mt-1.5 ${vcl}`}>{value}</p>
-                {sub && <p className="text-xs text-gray-400 mt-0.5 truncate">{sub}</p>}
+                <p className="text-xs font-medium text-gray-500 truncate">{item.label}</p>
+                <p className={`text-2xl font-bold mt-1.5 ${item.vcl}`}>{item.value}</p>
+                {item.sub && <p className="text-xs text-gray-400 mt-0.5 truncate">{item.sub}</p>}
               </div>
-              <div className={`w-9 h-9 flex-shrink-0 ${ibg} rounded-lg flex items-center justify-center`}>
-                <Icon className={`w-4.5 h-4.5 ${icl}`} />
+              <div className={`w-9 h-9 flex-shrink-0 ${item.ibg} rounded-lg flex items-center justify-center`}>
+                <item.icon className={`w-4.5 h-4.5 ${item.icl}`} />
               </div>
             </div>
           </div>
@@ -421,8 +399,8 @@ const SubBoxList = ({
         <div className="flex items-center gap-3 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl">
           <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0" />
           <p className="text-xs text-amber-800">
-            <span className="font-semibold">{partialCount} partial box{partialCount !== 1 ? 'es' : ''}</span> in progress — QC partials can print labels, but remain open until filled or closed.
-            Partial boxes and already prepared boxes cannot be selected for new challans.
+            <span className="font-semibold">{partialCount} partial box{partialCount !== 1 ? 'es' : ''}</span> in progress.
+            Partial boxes are excluded from print and challan until they are finalized as full and closed.
           </p>
         </div>
       )}
@@ -645,13 +623,13 @@ const SubBoxList = ({
                     {/* Actions */}
                     <td className="px-4 py-3.5">
                       <div className="flex items-center gap-1 justify-end">
-                        {/* Print — only for full boxes */}
+                        {/* Print — only for full and closed boxes */}
                         <button
                           onClick={() => printOne(sb)}
-                          disabled={!sb.barcode}
-                          title={sb.barcode ? 'Print Label' : 'Print unavailable'}
+                          disabled={!isFinishedGoodPrintable(sb)}
+                          title={isFinishedGoodPrintable(sb) ? 'Print Label' : 'Print unavailable for partial/open box'}
                           className={`p-1.5 rounded transition-colors ${
-                            sb.barcode
+                            isFinishedGoodPrintable(sb)
                               ? 'text-blue-600 hover:bg-blue-50'
                               : 'text-gray-300 cursor-not-allowed'
                           }`}

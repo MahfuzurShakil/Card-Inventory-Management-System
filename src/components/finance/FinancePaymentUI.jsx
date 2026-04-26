@@ -26,6 +26,7 @@ import {
   formatBalance,
   formatCurrency,
   getPaymentMetrics,
+  getPaymentStatusMeta,
   getStepBillAmount,
   toAmount,
 } from '../../utils/finance';
@@ -58,6 +59,12 @@ const COLOR_CLASSES = {
   pink: { bg: 'bg-pink-50', border: 'border-pink-200', icon: 'bg-pink-100 text-pink-600' },
   indigo: { bg: 'bg-indigo-50', border: 'border-indigo-200', icon: 'bg-indigo-100 text-indigo-600' },
   teal: { bg: 'bg-teal-50', border: 'border-teal-200', icon: 'bg-teal-100 text-teal-600' },
+};
+
+const SHIPMENT_STEP_THEME = {
+  bg: 'bg-blue-50',
+  border: 'border-blue-200',
+  icon: 'bg-blue-100 text-blue-600',
 };
 
 const CUSTOMS_FIELDS = [
@@ -208,12 +215,13 @@ const PaymentModal = ({
   initialPayment,
   lcNumber,
   shipmentNumber,
+  colorOverride = null,
   onClose,
   onSave,
 }) => {
   const meta = STEP_META[stepKey];
   const Icon = meta.icon;
-  const colors = COLOR_CLASSES[meta.color];
+  const colors = colorOverride || COLOR_CLASSES[meta.color];
   const [formData, setFormData] = useState(createPaymentDraft(initialPayment));
   const summary = useMemo(() => getPaymentMetrics(billAmount, payments), [billAmount, payments]);
   const draftAmount = toAmount(formData.amount);
@@ -384,23 +392,29 @@ export const FinanceStepCard = ({
   onPaymentEdit,
   onPaymentDelete,
   forceExpanded = false,
+  isExpanded,
+  onToggle,
+  theme = 'default',
 }) => {
-  const [expanded, setExpanded] = useState(forceExpanded);
+  const [internalExpanded, setInternalExpanded] = useState(forceExpanded);
   const [modalState, setModalState] = useState({ open: false, mode: 'create', payment: null });
   const stepInfo = getStepInfo(stepKey, shipment?.stepData, lc);
   const meta = STEP_META[stepKey];
   const Icon = meta.icon;
-  const colors = COLOR_CLASSES[meta.color];
+  const expanded = typeof isExpanded === 'boolean' ? isExpanded : internalExpanded;
+  const colors = theme === 'shipment-blue' ? SHIPMENT_STEP_THEME : COLOR_CLASSES[meta.color];
   const metrics = useMemo(() => getPaymentMetrics(stepInfo.billAmount, payments), [stepInfo.billAmount, payments]);
   const canRecordPayment = stepInfo.billAmount > 0;
+  const statusChip = getPaymentStatusMeta(metrics);
 
-  const statusChip = metrics.isSettled
-    ? { label: 'Paid', cls: 'border-green-200 bg-green-100 text-green-700' }
-    : metrics.isPartial
-      ? { label: 'Partial', cls: 'border-yellow-200 bg-yellow-100 text-yellow-700' }
-      : metrics.isPending
-        ? { label: 'Pending', cls: 'border-red-200 bg-red-100 text-red-700' }
-        : { label: 'No Data', cls: 'border-gray-200 bg-gray-100 text-gray-500' };
+  const toggleExpanded = () => {
+    if (onToggle) {
+      onToggle(stepKey);
+      return;
+    }
+
+    setInternalExpanded((prev) => !prev);
+  };
 
   const openCreateModal = (event) => {
     event?.stopPropagation();
@@ -427,7 +441,7 @@ export const FinanceStepCard = ({
       <div className={`overflow-hidden rounded-xl border transition-all ${expanded ? colors.border : 'border-gray-200'}`}>
         <div
           className={`flex cursor-pointer items-center gap-3 px-4 py-3.5 transition-colors ${expanded ? colors.bg : 'bg-white hover:bg-gray-50'}`}
-          onClick={() => setExpanded((prev) => !prev)}
+          onClick={toggleExpanded}
         >
           <div className={`rounded-lg p-2 ${expanded ? colors.icon : 'bg-gray-100 text-gray-500'}`}>
             <Icon className="h-4 w-4" />
@@ -574,6 +588,7 @@ export const FinanceStepCard = ({
           initialPayment={modalState.payment}
           lcNumber={lc?.lc_number}
           shipmentNumber={shipment?.shipment_number}
+          colorOverride={theme === 'shipment-blue' ? SHIPMENT_STEP_THEME : null}
           onClose={closeModal}
           onSave={handleModalSave}
         />

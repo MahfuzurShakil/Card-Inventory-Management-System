@@ -6,6 +6,7 @@ import {
   CheckCircle, SkipForward, Layers
 } from 'lucide-react';
 import { generateChallanNo, getChallanDocumentHtml, openChallanPrint } from '../utils/challanPrint';
+import { isFinishedGoodPrintable } from '../utils/recordOutput';
 
 const SubBoxRow = ({ sb, onRemove }) => {
   const good = sb.output_type === 'Good/ QC Approved';
@@ -125,7 +126,7 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
   const [scanError, setScanError] = useState('');
   const [confirmError, setConfirmError] = useState('');
   const [fieldErrors, setFieldErrors] = useState({});
-  const [addedIds, setAddedIds] = useState(preSelectedIds);
+  const [addedIds, setAddedIds] = useState(() => preSelectedIds.filter((id) => isFinishedGoodPrintable(subBoxes.find((sb) => sb.id === id))));
   const [confirmedChallan, setConfirmedChallan] = useState(null);
   const [challanInfo, setChallanInfo] = useState({
     challan_no: generateChallanNo(),
@@ -197,8 +198,8 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
       return;
     }
 
-    if (!found.barcode) {
-      setScanError('This is a partial box and cannot be added to a challan yet.');
+    if (!isFinishedGoodPrintable(found)) {
+      setScanError('This box is partial/open and cannot be added to a challan yet.');
       setScanValue('');
       return;
     }
@@ -244,6 +245,11 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
   const handleConfirmChallan = () => {
     if (addedBoxes.length === 0) {
       setConfirmError('Add at least one sub-box before creating the challan.');
+      return;
+    }
+
+    if (addedBoxes.some((box) => !isFinishedGoodPrintable(box))) {
+      setConfirmError('Partial or open boxes cannot be added to a challan.');
       return;
     }
 
@@ -567,8 +573,8 @@ const CreateChallan = ({ subBoxes, preSelectedIds = [], onBack, onDispatch }) =>
             <div className="flex items-start gap-2 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl">
               <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
               <p className="text-xs text-amber-800">
-                <span className="font-semibold">Partial boxes</span> cannot be added to a challan until they are finalized.
-                Close them first on the Sub-Box Creation page.
+                <span className="font-semibold">Partial or open boxes</span> cannot be added to a challan until they are finalized as full and closed.
+                Finalize them first from the Record Output page.
               </p>
             </div>
           )}

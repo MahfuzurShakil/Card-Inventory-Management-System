@@ -1,12 +1,17 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { ArrowLeft, FileText } from 'lucide-react';
 import {
-  FinanceScopeMetaCards,
+  FinanceMiniMeta,
   FinanceStatGrid,
   FinanceStepCard,
   STEP_META,
 } from '../components/finance/FinancePaymentUI';
-import { SHIPMENT_FINANCE_STEP_KEYS, formatCurrency, getShipmentFinanceSummary } from '../utils/finance';
+import {
+  SHIPMENT_FINANCE_STEP_KEYS,
+  formatCurrency,
+  getPaymentStatusMeta,
+  getShipmentFinanceSummary,
+} from '../utils/finance';
 
 const LandingCostShipment = ({
   lc,
@@ -17,10 +22,16 @@ const LandingCostShipment = ({
   onPaymentDelete,
   onBack,
 }) => {
+  const [expandedStepKey, setExpandedStepKey] = useState(null);
   const shipmentSummary = useMemo(
     () => getShipmentFinanceSummary(lc, shipment, financeData),
     [financeData, lc, shipment]
   );
+  const paymentStatus = getPaymentStatusMeta({
+    billAmount: shipmentSummary.totalBill,
+    totalSettled: shipmentSummary.totalSettled,
+    remaining: shipmentSummary.remaining,
+  });
 
   return (
     <div className="space-y-6">
@@ -38,20 +49,17 @@ const LandingCostShipment = ({
           </div>
         </div>
 
-        <span
-          className={`rounded-full px-4 py-2 text-sm font-medium ${
-            shipment.status === 'Completed'
-              ? 'bg-green-100 text-green-800'
-              : shipment.status === 'In Progress'
-                ? 'bg-blue-100 text-blue-800'
-                : 'bg-gray-100 text-gray-800'
-          }`}
-        >
-          {shipment.status}
+        <span className={`rounded-full border px-4 py-2 text-sm font-medium ${paymentStatus.cls}`}>
+          {paymentStatus.label}
         </span>
       </div>
 
-      <FinanceScopeMetaCards shipment={shipment} />
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        <FinanceMiniMeta label="Shipment Number" value={shipment.shipment_number} icon={STEP_META.freight_forwarder.icon} bgClassName="bg-blue-100" iconClassName="text-blue-600" />
+        <FinanceMiniMeta label="Payment Status" value={paymentStatus.label} icon={FileText} bgClassName="bg-blue-100" iconClassName="text-blue-600" />
+        <FinanceMiniMeta label="Progress" value={`${shipment.progress}%`} icon={STEP_META.bank_interest.icon} bgClassName="bg-blue-100" iconClassName="text-blue-600" />
+        <FinanceMiniMeta label="Completed Steps" value={`${shipment.completedSteps} / 6`} icon={STEP_META.customs_duty.icon} bgClassName="bg-blue-100" iconClassName="text-blue-600" />
+      </div>
 
       <FinanceStatGrid
         totalBill={shipmentSummary.totalBill}
@@ -80,6 +88,11 @@ const LandingCostShipment = ({
                 lc={lc}
                 shipment={shipment}
                 payments={stepSummary?.payments || []}
+                isExpanded={expandedStepKey === stepKey}
+                onToggle={(nextStepKey) =>
+                  setExpandedStepKey((prev) => (prev === nextStepKey ? null : nextStepKey))
+                }
+                theme="shipment-blue"
                 onPaymentSave={(_, paymentData) => onPaymentSave(stepSummary.financeKey, paymentData)}
                 onPaymentEdit={(_, paymentId, paymentData) =>
                   onPaymentEdit(stepSummary.financeKey, paymentId, paymentData)

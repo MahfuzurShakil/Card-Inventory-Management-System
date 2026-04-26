@@ -92,6 +92,22 @@ export const getPaymentMetrics = (billAmount, payments = []) => {
   };
 };
 
+export const getPaymentStatusMeta = (metrics) => {
+  if (!metrics || metrics.billAmount <= 0) {
+    return { label: 'No Data', cls: 'bg-gray-100 text-gray-500 border-gray-200' };
+  }
+
+  if (metrics.remaining <= 0) {
+    return { label: 'Paid', cls: 'bg-green-100 text-green-700 border-green-200' };
+  }
+
+  if (metrics.totalSettled > 0) {
+    return { label: 'Partial', cls: 'bg-yellow-100 text-yellow-700 border-yellow-200' };
+  }
+
+  return { label: 'Pending', cls: 'bg-red-100 text-red-700 border-red-200' };
+};
+
 export const getStepMetrics = ({ stepKey, lc, shipment, financeData }) => {
   const billAmount = getStepBillAmount(stepKey, shipment?.stepData, lc);
   const financeKey = getFinanceKey({
